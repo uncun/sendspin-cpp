@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "platform/concurrency.h"
 #include "connection_manager.h"
 
 #include "admission.h"
@@ -318,7 +319,7 @@ void ConnectionManager::reap_finished(bool drop_one_opened) {
 // ============================================================================
 
 std::optional<TimeTransform> ConnectionManager::clock() const {
-    std::lock_guard<std::mutex> lock(this->published_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->published_mutex_);
     if (this->published_.primary_slot >= MAX_ADMITTED) {
         return std::nullopt;
     }
@@ -326,7 +327,7 @@ std::optional<TimeTransform> ConnectionManager::clock() const {
 }
 
 std::optional<PublishedServer> ConnectionManager::server_information() const {
-    std::lock_guard<std::mutex> lock(this->published_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->published_mutex_);
     return this->published_.server;
 }
 
@@ -1024,7 +1025,7 @@ void ConnectionManager::refresh_published_state() {
         primary != nullptr ? static_cast<size_t>(primary - this->admitted_.data()) : MAX_ADMITTED;
     if (primary_changed || clocks != this->published_.clocks ||
         primary_slot != this->published_.primary_slot) {
-        std::lock_guard<std::mutex> lock(this->published_mutex_);
+        std::lock_guard<PlatformMutex> lock(this->published_mutex_);
         if (primary_changed && primary_conn == nullptr) {
             this->published_.server.reset();
         } else if (primary_changed) {

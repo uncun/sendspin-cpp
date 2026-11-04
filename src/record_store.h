@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
 #include "crypto/constants.h"
 #include "crypto/keys.h"
 #include "pairing_record.h"
@@ -401,7 +402,7 @@ private:
 
     // Struct fields
     /// Mutable so the const `has_pending_writes` can lock it.
-    mutable std::mutex mutex_;
+    mutable PlatformMutex mutex_;
 
     std::optional<SendspinPairingPsk> pairing_psk_;
 

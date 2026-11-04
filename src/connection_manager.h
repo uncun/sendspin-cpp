@@ -21,6 +21,7 @@
 #include "constants.h"
 #include "crypto/keys.h"
 #include "inline_vector.h"
+#include "platform/concurrency.h"
 #include "protocol_messages.h"
 #include "record_store.h"
 #include "sendspin/client.h"
@@ -1024,7 +1025,7 @@ private:
     };
     /// Guards published_. A leaf (docs/conventions.md): held only to copy a member, so it
     /// also serialises the role threads' clock() reads behind server_information() copies.
-    mutable std::mutex published_mutex_;
+    mutable PlatformMutex published_mutex_;
     /// Written by the protocol task (refresh_published_state()), which, as its only writer, also
     /// reads it without the lock; read from any thread (clock(), server_information()): role
     /// threads, the main loop, the consumer.

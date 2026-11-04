@@ -22,7 +22,9 @@
 #include "crypto/constants.h"
 #include "inbound_ring.h"
 #include "outbound_ring.h"
+#include "platform/concurrency.h"
 #include "platform/event_flags.h"
+#include "platform/thread.h"
 #include "sendspin/config.h"
 #include "sendspin/source_role.h"
 #include "source_encoder.h"
@@ -209,7 +211,7 @@ protected:
     std::unique_ptr<FlacSourceEncoder> flac_encoder_;
     std::unique_ptr<OutboundRing> capture_ring_;
     std::unique_ptr<OutboundRing> outbound_ring_;
-    std::thread task_thread_;
+    PlatformThread task_thread_;
 
     // Pointer fields
     /// The capture item being read; task thread only, like every field below that is not atomic

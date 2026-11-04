@@ -28,6 +28,7 @@
 #pragma once
 
 #include "crypto/constants.h"
+#include "platform/concurrency.h"
 #include "platform/crypto.h"
 #include "platform/event_flags.h"
 #include "platform/memory.h"
@@ -607,7 +608,7 @@ public:
 
     /// @brief Whether no item is linked. Any thread.
     bool is_empty() const {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         return this->head_ == INBOUND_LIST_END;
     }
 
@@ -630,7 +631,7 @@ private:
     EventFlags flags_;
     /// Guards head_, tail_ and the links and charges of linked items; a leaf lock (see the class
     /// comment).
-    mutable std::mutex mutex_;
+    mutable PlatformMutex mutex_;
 
     // Pointer fields
     /// Written once by create(), before the producer and consumer run.

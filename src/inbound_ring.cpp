@@ -15,6 +15,7 @@
 #include "inbound_ring.h"
 
 #include "constants.h"
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 #include "platform/time.h"
 
@@ -280,7 +281,7 @@ bool InboundItemList::count_local_return(InboundItemHeader* header, bool release
     uint32_t charge = 0;
     bool second = false;
     {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         if (release_charge) {
             charge = std::exchange(header->charge, 0);
         }
@@ -295,7 +296,7 @@ bool InboundItemList::count_local_return(InboundItemHeader* header, bool release
 void InboundItemList::append(void* item) {
     const auto offset = static_cast<uint32_t>(static_cast<uint8_t*>(item) - this->storage_);
     {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         inbound_item_header(item)->next = INBOUND_LIST_END;
         if (this->tail_ == INBOUND_LIST_END) {
             this->head_ = offset;
@@ -322,7 +323,7 @@ void* InboundItemList::take(uint32_t timeout_ms) {
 size_t InboundItemList::recall() {
     uint32_t offset = INBOUND_LIST_END;
     {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         offset = this->head_;
         this->head_ = INBOUND_LIST_END;
         this->tail_ = INBOUND_LIST_END;
@@ -344,7 +345,7 @@ void InboundItemList::release_charges() {
     {
         // A linked item has not been taken, and take() pops under this lock, so the consumer's
         // return_item() reads the zeroed charge and releases nothing twice.
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         for (uint32_t offset = this->head_; offset != INBOUND_LIST_END;) {
             InboundItemHeader* header = inbound_item_header(this->item_at(offset));
             released += std::exchange(header->charge, 0);
@@ -357,7 +358,7 @@ void InboundItemList::release_charges() {
 }
 
 void* InboundItemList::pop() {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<PlatformMutex> lock(this->mutex_);
     if (this->head_ == INBOUND_LIST_END) {
         return nullptr;
     }

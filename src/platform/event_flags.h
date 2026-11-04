@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
+
 #include <cstdint>
 
 #ifdef ESP_PLATFORM
@@ -192,7 +194,7 @@ public:
     /// @param bits Bitmask of bits to set.
     /// @return Resulting bit pattern after the set.
     uint32_t set(uint32_t bits) {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         this->bits_ |= bits;
         this->cv_.notify_all();
         return this->bits_;
@@ -202,7 +204,7 @@ public:
     /// @param bits Bitmask of bits to clear.
     /// @return Bit pattern captured before clearing.
     uint32_t clear(uint32_t bits) {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         uint32_t old = this->bits_;
         this->bits_ &= ~bits;
         return old;
@@ -220,7 +222,7 @@ public:
     /// @brief Returns the current bit pattern
     /// @return Current bit pattern.
     uint32_t get() const {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         return this->bits_;
     }
 
@@ -231,7 +233,7 @@ public:
     /// @param timeout_ms Milliseconds to wait (UINT32_MAX = wait forever).
     /// @return The bit pattern at the time the wait completed or timed out.
     uint32_t wait(uint32_t bits_to_wait, bool wait_all, bool clear_on_exit, uint32_t timeout_ms) {
-        std::unique_lock<std::mutex> lock(this->mtx_);
+        std::unique_lock<PlatformMutex> lock(this->mtx_);
 
         auto pred = [&]() -> bool {
             if (wait_all) {
@@ -260,8 +262,8 @@ public:
 
 private:
     // Struct fields
-    std::condition_variable cv_;
-    mutable std::mutex mtx_;
+    PlatformConditionVariable cv_;
+    mutable PlatformMutex mtx_;
 
     // 32-bit fields
     uint32_t bits_{0};

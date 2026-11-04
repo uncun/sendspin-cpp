@@ -19,7 +19,9 @@
 
 #include "inbound_ring.h"
 #include "inbox.h"
+#include "platform/concurrency.h"
 #include "platform/memory.h"
+#include "platform/thread.h"
 #include "protocol_messages.h"
 #include "sendspin/artwork_role.h"
 #include "teardown_tracker.h"
@@ -183,7 +185,7 @@ struct ArtworkRole::Impl : RoleTeardown {
     struct DrainTask {
         /// Its item list's flags also carry the decode thread's command bit.
         InboundConsumer inbound;
-        std::thread drain_thread;
+        PlatformThread drain_thread;
         /// Decode thread only; see ArtworkAssembly.
         ArtworkAssembly assemblies[ARTWORK_MAX_SLOTS];
         /// Guarded by slot_mutex; see SlotGate.
@@ -192,7 +194,7 @@ struct ArtworkRole::Impl : RoleTeardown {
         /// (frame_done(), the displays and clears drain_events() fires) and whether a complete
         /// delivery is parked behind it. One mutex for all slots is intentional: artwork is not a
         /// hot path, so cross-slot contention is negligible. The protocol task never takes it.
-        std::mutex slot_mutex;
+        PlatformMutex slot_mutex;
         /// The teardown generation of what the decode thread assembles and parks: a teardown
         /// that moves cleanup_generation past it drops all of it. Decode thread only.
         uint32_t assembly_generation{0};

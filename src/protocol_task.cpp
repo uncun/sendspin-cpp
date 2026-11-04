@@ -14,6 +14,7 @@
 
 #include "protocol_task.h"
 
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 #include "platform/thread.h"
 
@@ -57,7 +58,7 @@ bool ProtocolTask::start(Tick tick, size_t stack_size, unsigned priority, bool s
     this->tick_ = std::move(tick);
 
     platform_configure_thread("SsProto", stack_size, static_cast<int>(priority), stack_in_psram);
-    this->thread_ = std::thread(thread_entry, this);
+    this->thread_ = PlatformThread(thread_entry, this);
     return true;
 }
 
@@ -73,7 +74,7 @@ void ProtocolTask::stop() {
     // pushed and requests posted after the final tick stay for the joining thread
     // (take_command(), take_requests(), drop_commands()), which releases what a command holds
     // off this queue's lock.
-    std::lock_guard<std::mutex> lock(this->command_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->command_mutex_);
     this->latest_state_.reset();
 }
 
@@ -88,12 +89,12 @@ void ProtocolTask::drop_commands() {
 }
 
 void ProtocolTask::close_accepts() {
-    std::lock_guard<std::mutex> lock(this->command_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->command_mutex_);
     this->accepting_.store(false, std::memory_order_release);
 }
 
 void ProtocolTask::open_accepts() {
-    std::lock_guard<std::mutex> lock(this->command_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->command_mutex_);
     this->accepting_.store(true, std::memory_order_release);
 }
 
@@ -130,7 +131,7 @@ bool ProtocolTask::push_command(ProtocolCommand&& command) {
     bool queued = false;
     bool accepts_closed = false;
     {
-        std::lock_guard<std::mutex> lock(this->command_mutex_);
+        std::lock_guard<PlatformMutex> lock(this->command_mutex_);
         accepts_closed = is_accept && !this->accepting_.load(std::memory_order_relaxed);
         const size_t others_queued = this->command_count_ - this->accepts_queued_;
         const bool has_room = is_accept
@@ -166,7 +167,7 @@ bool ProtocolTask::push_command(ProtocolCommand&& command) {
 bool ProtocolTask::take_command(ProtocolCommand& out) {
     // Released before the lock is taken, so the move below lands in an empty command.
     clear_command(out);
-    std::lock_guard<std::mutex> lock(this->command_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->command_mutex_);
     if (this->command_count_ == 0) {
         return false;
     }
@@ -193,14 +194,14 @@ void ProtocolTask::clear_command(ProtocolCommand& command) {
 
 void ProtocolTask::publish_state(const ClientStateMessage& state) {
     {
-        std::lock_guard<std::mutex> lock(this->command_mutex_);
+        std::lock_guard<PlatformMutex> lock(this->command_mutex_);
         this->latest_state_ = state;
     }
     this->wake();
 }
 
 bool ProtocolTask::take_state(ClientStateMessage& out) {
-    std::lock_guard<std::mutex> lock(this->command_mutex_);
+    std::lock_guard<PlatformMutex> lock(this->command_mutex_);
     if (!this->latest_state_.has_value()) {
         return false;
     }
@@ -217,7 +218,7 @@ void ProtocolTask::post_requests(LifecycleRequests requests) {
     // Receives a waiting URL this post drops, so it is destroyed after the lock is released.
     std::optional<std::string> dropped;
     {
-        std::lock_guard<std::mutex> lock(this->command_mutex_);
+        std::lock_guard<PlatformMutex> lock(this->command_mutex_);
         LifecycleRequests& waiting = this->requests_;
         if (requests.disconnect.has_value()) {
             waiting.disconnect = requests.disconnect;
@@ -241,7 +242,7 @@ void ProtocolTask::post_requests(LifecycleRequests requests) {
 bool ProtocolTask::take_requests(LifecycleRequests& out) {
     LifecycleRequests taken;
     {
-        std::lock_guard<std::mutex> lock(this->command_mutex_);
+        std::lock_guard<PlatformMutex> lock(this->command_mutex_);
         std::swap(taken, this->requests_);
     }
     if (!taken.connect_to.has_value() && !taken.disconnect.has_value() &&
