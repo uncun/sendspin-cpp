@@ -4,6 +4,7 @@
 
 #include "platform/logging.h"
 #include "platform/time.h"
+#include <psa/crypto.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -131,6 +132,7 @@ SsErr SendspinClientConnection::send_frame(const uint8_t* data, size_t len,
 }
 
 bool SendspinClientConnection::open() {
+    psa_crypto_init();
     WebSocketUrl parsed;
     return parse_url(url_, parsed) && connect_tcp(parsed.host, parsed.port) &&
            upgrade_websocket(parsed.authority, parsed.target);

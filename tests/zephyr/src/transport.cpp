@@ -4,7 +4,7 @@
 #include "platform/event_flags.h"
 #include "platform/time.h"
 #include "protocol_task.h"
-#include <mbedtls/sha1.h>
+#include <psa/crypto.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/sys/base64.h>
 #include <zephyr/ztest.h>
@@ -51,7 +51,9 @@ bool upgrade(int fd) {
     std::string key = request.substr(begin + header.size(), end - begin - header.size());
     key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     uint8_t digest[20];
-    if (mbedtls_sha1(reinterpret_cast<const uint8_t*>(key.data()), key.size(), digest) != 0) {
+    size_t digest_len = 0;
+    if (psa_hash_compute(PSA_ALG_SHA_1, reinterpret_cast<const uint8_t*>(key.data()), key.size(),
+                         digest, sizeof(digest), &digest_len) != PSA_SUCCESS) {
         return false;
     }
     uint8_t accept[32]{};

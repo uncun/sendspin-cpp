@@ -1004,7 +1004,7 @@ protected:
     /// @brief Returns the next process-unique connection id (starts at 1, monotonic).
     /// @note The function-local atomic gives thread-safe, ordering-independent uniqueness.
     static uint64_t next_instance_id() {
-        static std::atomic<uint64_t> counter{1};
+        static std::atomic<uint32_t> counter{1};
         return counter.fetch_add(1, std::memory_order_relaxed);
     }
 

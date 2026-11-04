@@ -22,7 +22,7 @@
 
 #include <cstdint>
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !defined(__ZEPHYR__)
 
 // ESP-IDF: thin wrapper around FreeRTOS event group (uses direct task notifications)
 #include "platform/time.h"

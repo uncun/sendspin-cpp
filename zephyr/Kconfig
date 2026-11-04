@@ -7,10 +7,10 @@ menuconfig SENDSPIN
 	depends on NETWORKING && MULTITHREADING
 	select REQUIRES_FULL_LIBCPP
 	select WEBSOCKET_CLIENT
+	select PSA_WANT_ALG_SHA_1
 	select THREAD_STACK_INFO
 	select DYNAMIC_THREAD
 	select DYNAMIC_THREAD_ALLOC
-	select THREAD_LOCAL_STORAGE
 	help
 	  Build sendspin-cpp with native Zephyr threads and an outbound ws://
 	  transport. Connect explicitly with SendspinClient::connect_to().

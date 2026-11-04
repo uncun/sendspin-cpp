@@ -88,7 +88,7 @@ struct SharedRingLayout {
 
 }  // namespace sendspin
 
-#ifdef ESP_PLATFORM
+#if defined(ESP_PLATFORM) && !defined(__ZEPHYR__)
 
 #include "platform/time.h"
 #include <freertos/FreeRTOS.h>

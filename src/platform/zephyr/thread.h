@@ -18,14 +18,17 @@ struct ZephyrThreadConfig {
     int priority{CONFIG_SENDSPIN_THREAD_PRIORITY};
 };
 
-inline thread_local ZephyrThreadConfig next_thread_config;
+inline k_spinlock thread_config_lock;
+inline ZephyrThreadConfig next_thread_config;
 
 // ESP priorities grow with urgency; Zephyr preemptive priorities grow in the opposite
 // direction. Keep application priorities relative to the configurable Zephyr base.
 inline void platform_configure_thread(const char* name, size_t stack_size, int priority, bool) {
+    k_spinlock_key_t key = k_spin_lock(&thread_config_lock);
     next_thread_config = {name, std::max(stack_size, size_t(CONFIG_SENDSPIN_THREAD_STACK_SIZE)),
                           std::clamp(CONFIG_SENDSPIN_THREAD_PRIORITY + 5 - priority, 0,
                                      CONFIG_NUM_PREEMPT_PRIORITIES - 1)};
+    k_spin_unlock(&thread_config_lock, key);
 }
 
 // The control block and stack stay at stable addresses across moves. Like std::thread,
@@ -35,8 +38,13 @@ public:
     PlatformThread() = default;
     template <class Function, class Argument>
     PlatformThread(Function function, Argument argument) {
-        auto config = next_thread_config;
-        next_thread_config = {};
+        ZephyrThreadConfig config;
+        {
+            k_spinlock_key_t key = k_spin_lock(&thread_config_lock);
+            config = next_thread_config;
+            next_thread_config = {};
+            k_spin_unlock(&thread_config_lock, key);
+        }
         state_ = new State;
         state_->function = [function, argument] { function(argument); };
         state_->stack = k_thread_stack_alloc(config.stack_size, 0);
