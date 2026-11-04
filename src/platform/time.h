@@ -47,6 +47,10 @@ inline TickType_t platform_ms_to_ticks(uint32_t timeout_ms) {
 
 }  // namespace sendspin
 
+#elif defined(__ZEPHYR__)
+
+#include "platform/zephyr/time.h"
+
 #else  // Host
 
 #include <chrono>
