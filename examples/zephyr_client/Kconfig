@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "Sendspin Zephyr client"
+source "Kconfig.zephyr"
+
+config SENDSPIN_SAMPLE_SERVER_URL
+	string "Sendspin server WebSocket URL"
+	default "ws://192.0.2.1:8927/sendspin"
