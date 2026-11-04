@@ -418,7 +418,9 @@ public:
     ///         is then left with the caller, which closes its socket and releases it on its own
     ///         close path (see SendspinWsServer::NewConnectionCallback), so it is never destroyed
     ///         inside this call.
+#ifndef SENDSPIN_OUTBOUND_ONLY
     bool on_new_connection(const std::shared_ptr<SendspinServerConnection>& conn);
+#endif
 
     // ========================================
     // Protocol task: commands
@@ -631,7 +633,9 @@ private:
     /// every tick, which would spam the log. Nothing while admission is closed.
     /// @return Milliseconds until an armed retry is due; otherwise NO_DEADLINE once started or
     ///         while the network is down (the main loop wakes the task when it comes up).
+#ifndef SENDSPIN_OUTBOUND_ONLY
     uint32_t maybe_start_ws_server(int64_t now_us);
+#endif
 
     /// @brief Sends hellos for nursery connections whose server/hello has arrived (the
     /// level-triggered hello scan), admits the ones that are now operational, and reaps the ones
@@ -961,7 +965,9 @@ private:
     const SendspinConnection* pairing_window_conn_{nullptr};
     // Created by the main loop's start() on first use; started there or by the protocol task,
     // ticked by the task, and stopped by finish_stop() once the task is joined.
+#ifndef SENDSPIN_OUTBOUND_ONLY
     std::unique_ptr<SendspinWsServer> ws_server_;
+#endif
 
     // String fields
     /// server_id of the last-played server; empty if unset. Written on the main loop by

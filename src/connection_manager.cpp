@@ -30,10 +30,14 @@
 #include "record_store.h"
 #include "sendspin/config.h"
 #include "sendspin/types.h"
+#ifndef SENDSPIN_OUTBOUND_ONLY
 #include "server_connection.h"
+#endif
 #include "time_burst.h"
 #include "time_filter.h"
+#ifndef SENDSPIN_OUTBOUND_ONLY
 #include "ws_server.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -225,6 +229,7 @@ void ConnectionManager::start() {
     this->shutdown_ui_ = {false, false};
     this->ws_server_start_retry_time_us_ = 0;
 
+#ifndef SENDSPIN_OUTBOUND_ONLY
     if (this->ws_server_ == nullptr && this->client_->config_.accept_inbound_connections) {
         // First start: create the server object and configure it once. The config is immutable
         // for the client's lifetime, so a restart reuses these values along with the object.
@@ -259,10 +264,13 @@ void ConnectionManager::start() {
         this->ws_server_->set_wake_callback([task]() { task->wake(); });
     }
 
+#endif
     this->client_->protocol_task_->open_accepts();
     // Started here when the network is already up, so the server is listening once start()
     // returns; otherwise the protocol task starts it once a loop() finds the network ready.
+#ifndef SENDSPIN_OUTBOUND_ONLY
     (void)this->maybe_start_ws_server(platform_time_us());
+#endif
 }
 
 void ConnectionManager::close_admission() {
@@ -284,9 +292,11 @@ PairingUiSnapshot ConnectionManager::finish_stop() {
     for (auto& entry : this->reaping_) {
         entry.conn->close_transport_now();
     }
+#ifndef SENDSPIN_OUTBOUND_ONLY
     if (this->ws_server_ != nullptr) {
         this->ws_server_->stop();
     }
+#endif
     // Released here, after the server stop: an outbound connection's destructor stops its
     // transport synchronously, and every outbound one of these had opened.
     InlineVector<std::shared_ptr<SendspinConnection>, MAX_OPEN_CONNECTIONS> releasing;
@@ -335,6 +345,7 @@ std::optional<PublishedServer> ConnectionManager::server_information() const {
 // Transport threads
 // ============================================================================
 
+#ifndef SENDSPIN_OUTBOUND_ONLY
 bool ConnectionManager::on_new_connection(const std::shared_ptr<SendspinServerConnection>& conn) {
     // Refused unattached, so its transport drops everything and never waits on the gate.
     if (!conn->inbound_gate().is_created()) {
@@ -369,6 +380,7 @@ bool ConnectionManager::on_new_connection(const std::shared_ptr<SendspinServerCo
     return false;
 }
 
+#endif
 // ============================================================================
 // Protocol task: commands
 // ============================================================================
@@ -944,10 +956,12 @@ uint32_t ConnectionManager::tick(int64_t now_us) {
 
     // The platform server's pending-upgrade reap (ESP: close sessions that never complete their
     // upgrade; host: none, IXWebSocket times them out itself).
+#ifndef SENDSPIN_OUTBOUND_ONLY
     if (this->ws_server_ != nullptr) {
         next = std::min(next, this->ws_server_->tick());
     }
     next = std::min(next, this->maybe_start_ws_server(now_us));
+#endif
     return next;
 }
 
@@ -1188,6 +1202,7 @@ uint16_t ConnectionManager::roles_owned_by_others(const AdmittedEntry* except) c
 // Tick steps
 // ============================================================================
 
+#ifndef SENDSPIN_OUTBOUND_ONLY
 uint32_t ConnectionManager::maybe_start_ws_server(int64_t now_us) {
     if (this->ws_server_ == nullptr || this->ws_server_->is_started() || !this->is_accepting()) {
         return ProtocolTask::NO_DEADLINE;
@@ -1217,6 +1232,7 @@ uint32_t ConnectionManager::maybe_start_ws_server(int64_t now_us) {
     return ProtocolTask::NO_DEADLINE;
 }
 
+#endif
 uint32_t ConnectionManager::scan_nursery(int64_t now_us) {
     uint32_t next = ProtocolTask::NO_DEADLINE;
 
