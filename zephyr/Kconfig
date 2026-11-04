@@ -1,0 +1,63 @@
+# Copyright 2026 Sendspin Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig SENDSPIN
+	bool "Sendspin synchronized audio client"
+	depends on CPP && STD_CPP_VERSION >= 202002
+	depends on NETWORKING && MULTITHREADING
+	select REQUIRES_FULL_LIBCPP
+	select WEBSOCKET_CLIENT
+	select THREAD_STACK_INFO
+	select DYNAMIC_THREAD
+	select DYNAMIC_THREAD_ALLOC
+	select THREAD_LOCAL_STORAGE
+	help
+	  Build sendspin-cpp with native Zephyr threads and an outbound ws://
+	  transport. Connect explicitly with SendspinClient::connect_to().
+	  Supports PCM and FLAC. The application supplies networking readiness,
+	  persistence and audio callbacks. No inbound listener or Opus codec.
+
+if SENDSPIN
+
+config SENDSPIN_ENABLE_PLAYER
+	bool "Player role (PCM and FLAC decoding)"
+	default y
+
+config SENDSPIN_ENABLE_CONTROLLER
+	bool "Controller role"
+	default y
+
+config SENDSPIN_ENABLE_METADATA
+	bool "Metadata role"
+	default y
+
+config SENDSPIN_ENABLE_COLOR
+	bool "Color role"
+
+config SENDSPIN_ENABLE_ARTWORK
+	bool "Artwork role"
+
+config SENDSPIN_ENABLE_VISUALIZER
+	bool "Visualizer role"
+
+config SENDSPIN_ENABLE_SOURCE
+	bool "Source role (PCM and FLAC encoding)"
+
+config SENDSPIN_THREAD_STACK_SIZE
+	int "Minimum stack size per Sendspin thread"
+	default 8192
+	range 2048 262144
+	help
+	  Stack sizes from the client/role configs are clamped to at least this
+	  size. Tune using stack analysis on the target board. Stacks use the
+	  Zephyr system heap (HEAP_MEM_POOL_SIZE); audio buffers use the C heap.
+
+config SENDSPIN_THREAD_PRIORITY
+	int "Base Zephyr preemptive priority"
+	default 8
+	range 0 15
+	help
+	  Corresponds to Sendspin priority 5. Larger Sendspin priorities get
+	  smaller Zephyr priority numbers, clamped to the available range.
+
+endif

@@ -1,0 +1,15 @@
+manifest:
+  version: "0.12"
+  projects:
+    - name: arduinojson
+      url: https://github.com/bblanchon/ArduinoJson
+      revision: v7.4.1
+      path: modules/lib/arduinojson
+    - name: noise-c
+      url: https://github.com/esphome-libs/noise-c
+      revision: v0.1.13
+      path: modules/lib/noise-c
+    - name: micro-flac
+      url: https://github.com/esphome-libs/micro-flac
+      revision: v0.3.0
+      path: modules/lib/micro-flac

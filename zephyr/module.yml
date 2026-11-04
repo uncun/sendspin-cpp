@@ -1,0 +1,4 @@
+name: sendspin
+build:
+  cmake: zephyr
+  kconfig: zephyr/Kconfig
