@@ -1,0 +1,59 @@
+name: Zephyr
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  zephyr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gperf device-tree-compiler
+          pip install west pyyaml
+      - name: Create west workspace with the module's dependency manifest
+        run: |
+          mkdir -p "$RUNNER_TEMP/sendspin-west/manifest"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+          manifest = yaml.safe_load(Path("west.yml").read_text())
+          manifest["manifest"]["projects"].append({
+              "name": "zephyr",
+              "url": "https://github.com/zephyrproject-rtos/zephyr",
+              "revision": "v4.3.0",
+              "import": {"name-allowlist": ["cmsis", "mbedtls"]},
+          })
+          root = Path(os.environ["RUNNER_TEMP"]) / "sendspin-west"
+          (root / "manifest/west.yml").write_text(yaml.safe_dump(manifest))
+          PY
+          cd "$RUNNER_TEMP/sendspin-west"
+          west init -l manifest
+          west update --narrow
+          pip install -r zephyr/scripts/requirements-base.txt \
+            -r zephyr/scripts/requirements-build-test.txt \
+            -r zephyr/scripts/requirements-run-test.txt
+          west sdk install --version 0.17.4 --toolchains arm-zephyr-eabi
+      - name: Build and run Zephyr tests on ARM
+        run: |
+          cd "$RUNNER_TEMP/sendspin-west"
+          west twister -T "$GITHUB_WORKSPACE/tests/zephyr" -p qemu_cortex_a9 \
+            --inline-logs -O build-tests -x "ZEPHYR_EXTRA_MODULES=$GITHUB_WORKSPACE"
+      - name: Build example without audio roles
+        run: |
+          cd "$RUNNER_TEMP/sendspin-west"
+          west build -b qemu_cortex_a9 "$GITHUB_WORKSPACE/examples/zephyr_client" -d build-sample -- \
+            -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE"
