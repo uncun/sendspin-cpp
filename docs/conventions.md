@@ -127,6 +127,12 @@ checklists in `.claude/skills/` apply these standards to a diff.
   role's slot mutex, `ShadowSlot`'s and the ESP server's pending-upgrade mutex. A
   change that would take a second library lock under one of them is a design
   change, not a local trade-off.
+  The Zephyr transport's `send_mutex_` is an I/O lock outside those leaves: it
+  serializes complete WebSocket writes (protocol-task data and receive-thread
+  pongs) and socket destruction. No library state lock is held when acquiring
+  it, and it calls no library handler or consumer. Explicit frame writes use
+  the transport timeout; cancellation refuses further sends before cleanup
+  takes the lock. Socket/context release belongs to the receive worker.
 
 ## Protocol validation
 
@@ -145,7 +151,9 @@ checklists in `.claude/skills/` apply these standards to a diff.
 ## Platform abstraction
 
 - Core sources in `src/` contain no `#ifdef ESP_PLATFORM`. Platform
-  differences live in `src/platform/`, `src/esp/`, and `src/host/`. Within
+  differences live in `src/platform/`, `src/esp/`, `src/host/`, and `src/zephyr/`.
+  `SENDSPIN_OUTBOUND_ONLY` gates the connection manager's inbound listener
+  for platforms that only provide an outbound transport. Within
   the library, role compile-gates (`#ifdef SENDSPIN_ENABLE_*`) live only in
   `cmake/sources.cmake` and the dispatch points in
   `include/sendspin/client.h`, `src/client.cpp` and `src/client_dispatch.cpp`,
@@ -248,9 +256,11 @@ checklists in `.claude/skills/` apply these standards to a diff.
 
 ## Testing
 
-- Tests are host-only, white-box, and live in `tests/`; they include private
+- Host tests are white-box and live in `tests/`; they include private
   headers from `src/` and run under ASan/UBSan in CI. The ESP-IDF side is
-  covered by the build-only project in `tests/esp_idf/`.
+  covered by the build-only project in `tests/esp_idf/`. Native Zephyr threads,
+  clock rollover, ring behavior, lifecycle and WebSocket transport are exercised
+  by ztest/Twister on QEMU in `tests/zephyr/`.
 - Production code in `src/` and `include/` acquires nothing for the sake of
   tests: no friends, test-only hooks, widened visibility, extra template
   parameters, injectable clocks or transports, or fixture-aware naming.

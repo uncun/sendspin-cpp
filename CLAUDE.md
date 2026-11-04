@@ -53,6 +53,9 @@ src/crypto/                 - Crypto primitives and Noise/pairing constants (CPa
 src/platform/               - Platform abstraction headers and host-only source files
 src/esp/                    - ESP-IDF networking implementations and headers
 src/host/                   - Host (IXWebSocket) networking implementations and headers
+src/zephyr/                 - Zephyr outbound WebSocket transport, MAC detection and Noise RNG
+zephyr/                     - Zephyr module discovery, CMake and Kconfig
+west.yml                    - Importable west dependency manifest
 cmake/                      - CMake modules (sources.cmake, host.cmake)
 examples/common/            - Shared host-example helpers (PortAudio sink, file-backed persistence provider)
 examples/basic_client/      - Standalone host example with PortAudio audio output
@@ -73,7 +76,10 @@ docs/                       - integration-guide.md (consumer guide), internals.m
 
 ### Platform abstraction
 
-Headers in `src/platform/` use `#ifdef ESP_PLATFORM` to provide unified APIs across platforms:
+Headers in `src/platform/` select ESP-IDF, Zephyr or host implementations.
+`concurrency.h` provides PlatformMutex and PlatformConditionVariable; `thread.h`
+provides PlatformThread and platform_sleep_for. Host and ESP use standard C++
+primitives; Zephyr uses native kernel primitives (`platform/zephyr/thread.h`).
 
 - `logging.h`: `SS_LOGE`/`SS_LOGW`/`SS_LOGI`/`SS_LOGD`/`SS_LOGV` macros (ESP: `esp_log.h`, host: `printf`-based)
 - `memory.h`: `platform_malloc`/`platform_realloc`/`platform_malloc_internal`/`platform_realloc_internal`/`platform_free` (ESP: SPIRAM-preferring or internal-RAM-preferring `heap_caps_malloc_prefer`, host: standard `malloc`). `PlatformBuffer` accepts a `MemoryLocation` (defined in `include/sendspin/types.h`) to select the preference.
@@ -90,11 +96,13 @@ Headers in `src/platform/` use `#ifdef ESP_PLATFORM` to provide unified APIs acr
 - `event_flags.h`: event flag group (ESP: FreeRTOS event group, host: mutex/condition variable)
 - `shadow_slot.h`: mutex-protected single-writer/single-reader slot between two threads (the sync task's playback-progress slot); state the main loop reads goes through the inbox (`inbox.h`) instead
 
-Core source files in `src/` have no `#ifdef ESP_PLATFORM` guards; all platform differences are isolated to the platform layer and the `src/esp/`/`src/host/` directories.
+Core source files in `src/` have no `#ifdef ESP_PLATFORM` guards. `SENDSPIN_OUTBOUND_ONLY`
+removes the inbound listener from the connection manager on Zephyr; all platform differences are isolated to the platform layer and the `src/esp/`/`src/host/` directories.
 
 ## Build
 
 - **ESP-IDF**: Used as an IDF component via `idf_component.yml`. Sources defined in `cmake/sources.cmake`.
+- **Zephyr**: discovered through `zephyr/module.yml`; consumers import `west.yml` and enable `CONFIG_SENDSPIN`. Native threads and outbound `ws://` only, PCM/FLAC roles, no Opus. See `docs/zephyr.md`; `tests/zephyr` runs on QEMU Cortex-A9.
 - **Host (CMake)**: `cmake -B build && cmake --build build`. Uses ccache when installed (`SENDSPIN_USE_CCACHE`, default on when standalone). Fetches dependencies via FetchContent: ArduinoJson, noise-c, IXWebSocket, micro-flac for the player or source role, and micro-opus for the player or source role when `SENDSPIN_ENABLE_OPUS` is on.
 - **Tests**: `cmake -B build-tests -DSENDSPIN_BUILD_TESTS=ON -DENABLE_SANITIZERS=ON -DBUILD_EXAMPLES=OFF .`, then `cmake --build build-tests --target sendspin_tests` and `ctest --test-dir build-tests --output-on-failure`. The target also builds `sendspin_alloc_tests`, which counts the library's `operator new` calls from accept to admission, from `connect_to()` to admission, for a `client/state`, for a time burst, for a controller `server/state`, for `group/update`, for metadata `server/state` (a first state, a second, a scheduled one and one without text), for the `stream/*` messages, for the sync task's first FLAC codec header, for a FLAC `stream/start` the player takes, for a `stream/start` section the connection's roles do not take, for the first spectrum frame, and through the record flush that follows each of a playback handoff to another paired server, a `server/unpair`, a `pairing_psk` pairing and a dynamic pairing code pairing in each emission format; `SENDSPIN_ALLOC_REPORT=1` prints them grouped by call site.
 - **ThreadSanitizer tests**: `cmake -B build-tsan -DSENDSPIN_BUILD_TESTS=ON -DENABLE_TSAN=ON -DBUILD_EXAMPLES=OFF .`, then `cmake --build build-tsan --target sendspin_tests` and `TSAN_OPTIONS=halt_on_error=1 ctest --test-dir build-tsan --output-on-failure`. `ENABLE_TSAN` applies the thread sanitizer to every target, including the fetched dependencies, and cannot be combined with `ENABLE_SANITIZERS`.
