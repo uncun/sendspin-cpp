@@ -3,7 +3,7 @@
 [![CI](https://github.com/Sendspin/sendspin-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/Sendspin/sendspin-cpp/actions/workflows/ci.yml)
 [![Component Registry](https://components.espressif.com/components/sendspin/sendspin-cpp/badge.svg)](https://components.espressif.com/components/sendspin/sendspin-cpp)
 
-Standalone C++ library implementing the [Sendspin synchronized audio streaming protocol](https://www.sendspin-audio.com/). Builds on both ESP-IDF (ESP32) and host platforms (macOS/Linux). Designed to be consumed by ESPHome but has no ESPHome dependencies.
+Standalone C++ library implementing the [Sendspin synchronized audio streaming protocol](https://www.sendspin-audio.com/). Builds on ESP-IDF (ESP32), Zephyr and host platforms (macOS/Linux). Designed to be consumed by ESPHome but has no ESPHome dependencies.
 
 [![A project from the Open Home Foundation](https://www.openhomefoundation.org/badges/ohf-project.png)](https://www.openhomefoundation.org/)
 
@@ -13,7 +13,7 @@ Standalone C++ library implementing the [Sendspin synchronized audio streaming p
 - WebSocket client and server support
 - Mandatory Noise KKpsk2 encryption on every connection, with Pairing PSK token and pairing code pairing
 - Decodes FLAC and PCM and streams captured audio as FLAC or PCM, plus Opus decode and encode when built with `SENDSPIN_ENABLE_OPUS` (the default)
-- Cross-platform: ESP-IDF (ESP32) and host (macOS/Linux)
+- Cross-platform: ESP-IDF (ESP32), Zephyr (outbound client, PCM/FLAC), and host (macOS/Linux)
 
 ## Documentation
 
@@ -43,11 +43,19 @@ dependencies:
 
 Requires ESP-IDF v5.5.2 or later, the first release whose ring buffer reclaims space correctly when items are returned out of order.
 
+### Zephyr
+
+Add sendspin-cpp to your west manifest with `import: true`, run `west update`,
+and enable `CONFIG_SENDSPIN`. See the [Zephyr integration guide](docs/zephyr.md)
+for the manifest, configuration, supported features and build commands.
+
 ## Examples
 
 - **`examples/basic_client/`** -- Standalone host example with PortAudio audio output
 - **`examples/tui_client/`** -- Terminal UI host example with PortAudio audio output
 - **`examples/source_client/`** -- Host example streaming the default PortAudio input to the server (source role)
+
+- **`examples/zephyr_client/`** -- Zephyr controller/metadata client using native networking
 
 ## License
 

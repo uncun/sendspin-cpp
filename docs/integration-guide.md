@@ -1,5 +1,8 @@
 # Integration Guide
 
+For Zephyr builds, start with the [Zephyr integration guide](zephyr.md) for west,
+Kconfig, native threading and transport limitations.
+
 This guide describes what you need to implement in order to integrate sendspin-cpp into your application. The library provides the Sendspin protocol, audio decoding, and time synchronization. You provide the audio output, network readiness, and optional persistence.
 
 ## Overview
