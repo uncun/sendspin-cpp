@@ -1,0 +1,9 @@
+tests:
+  sendspin.zephyr:
+    tags:
+      - sendspin
+      - net
+    platform_allow:
+      - qemu_cortex_a9
+    integration_platforms:
+      - qemu_cortex_a9
