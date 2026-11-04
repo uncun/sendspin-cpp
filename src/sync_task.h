@@ -22,8 +22,10 @@
 #include "audio_types.h"
 #include "decoder.h"
 #include "inbound_ring.h"
+#include "platform/concurrency.h"
 #include "platform/event_flags.h"
 #include "platform/shadow_slot.h"
+#include "platform/thread.h"
 #include "sendspin/player_role.h"
 #include "transfer_buffer.h"
 
@@ -342,7 +344,7 @@ protected:
     // Latest-wins slot that merges (sum frames, keep latest finish_timestamp)
     // updates from the audio callback and is drained by the sync thread.
     ShadowSlot<PlaybackProgress> playback_progress_slot_;
-    std::thread sync_thread_;
+    PlatformThread sync_thread_;
 
     /// See inbound(); InboundConsumer states its threads.
     InboundConsumer inbound_;

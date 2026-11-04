@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "constants.h"
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 #include "platform/thread.h"
 #include "platform/time.h"
@@ -200,7 +201,7 @@ bool VisualizerRole::Impl::start(InboundRing* ring) {
 
     platform_configure_thread("SsVis", 4096, static_cast<int>(this->config.priority),
                               this->config.psram_stack);
-    this->drain_task->drain_thread = std::thread(drain_thread_func, this);
+    this->drain_task->drain_thread = PlatformThread(drain_thread_func, this);
     return true;
 }
 

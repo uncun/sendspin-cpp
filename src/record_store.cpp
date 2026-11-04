@@ -16,6 +16,7 @@
 
 #include "crypto/constants.h"
 #include "crypto/keys.h"
+#include "platform/concurrency.h"
 #include "platform/crypto.h"
 #include "platform/logging.h"
 #include "sendspin/persistence_codec.h"
@@ -343,7 +344,7 @@ bool RecordStore::store_record_superseding(const PairingRecord& record,
     // RAM-only: runs on the protocol task (the server/pair-finalize ack handler), where the
     // record must resolve before the handler returns, since the server's follow-up re-handshake
     // is the next message on that thread.
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<PlatformMutex> lock(this->mutex_);
 
     size_t idx = this->find_index(record.psk_id.view());
     const bool is_insert = (idx == NPOS);
@@ -414,7 +415,7 @@ bool RecordStore::persist_records() {
     SlotSet slots;
     bool order_owed = false;
     {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         slots = std::exchange(this->dirty_slots_, SlotSet{});
         order_owed = std::exchange(this->order_dirty_, false);
     }
@@ -434,7 +435,7 @@ bool RecordStore::persist_records() {
         const std::string key = persistence_keys::record_slot_key(slot);
         std::span<uint8_t> blob;
         {
-            std::lock_guard<std::mutex> lock(this->mutex_);
+            std::lock_guard<PlatformMutex> lock(this->mutex_);
             blob = this->encode_slot_locked(static_cast<uint8_t>(slot), buffer);
         }
         if (this->save_write(key, blob)) {
@@ -452,7 +453,7 @@ bool RecordStore::persist_records() {
     if (order_owed) {
         std::span<uint8_t> blob;
         {
-            std::lock_guard<std::mutex> lock(this->mutex_);
+            std::lock_guard<PlatformMutex> lock(this->mutex_);
             blob = this->encode_order_locked(buffer);
         }
         if (!this->save_write(persistence_keys::RECORD_ORDER, blob)) {
@@ -476,12 +477,12 @@ bool RecordStore::persist_records() {
 }
 
 bool RecordStore::has_pending_writes() const {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<PlatformMutex> lock(this->mutex_);
     return this->order_dirty_ || this->dirty_slots_.any();
 }
 
 bool RecordStore::note_record_removed(std::string_view psk_id) {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<PlatformMutex> lock(this->mutex_);
     const size_t idx = this->find_index(psk_id);
     if (idx == NPOS) {
         return false;
@@ -493,7 +494,7 @@ bool RecordStore::note_record_removed(std::string_view psk_id) {
 }
 
 bool RecordStore::note_record_played(std::string_view psk_id) {
-    std::lock_guard<std::mutex> lock(this->mutex_);
+    std::lock_guard<PlatformMutex> lock(this->mutex_);
     const size_t idx = this->find_index(psk_id);
     // A record that is already the most recent moves nothing and writes nothing, which is every
     // repeat activate of the server already playing.

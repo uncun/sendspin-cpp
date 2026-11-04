@@ -15,6 +15,7 @@
 #include "source_task.h"
 
 #include "crypto/constants.h"
+#include "platform/concurrency.h"
 #include "platform/crypto.h"
 #include "platform/logging.h"
 #include "platform/thread.h"
@@ -158,7 +159,7 @@ bool SourceTask::start(ProtocolTask* protocol_task) {
     }
     platform_configure_thread("SsSrc", stack_size, static_cast<int>(config.priority),
                               config.psram_stack);
-    this->task_thread_ = std::thread(thread_entry, this);
+    this->task_thread_ = PlatformThread(thread_entry, this);
     this->event_flags_.wait(SourceTaskBits::SOURCE_TASK_IDLE | SourceTaskBits::SOURCE_TASK_STOPPED,
                             false, false, UINT32_MAX);
     return true;

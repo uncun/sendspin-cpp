@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
+
 #include <mutex>
 #include <utility>
 
@@ -44,14 +46,14 @@ public:
     /// @brief Merge a delta into the slot using a callable: fn(T& current, T&& delta)
     template <typename MergeFn>
     void merge(MergeFn&& fn, T delta) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         fn(this->slot_, std::move(delta));
         this->dirty_ = true;
     }
 
     /// @brief Move the accumulated value out if dirty; false when the slot was clean
     bool take(T& out) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         if (!this->dirty_) {
             return false;
         }
@@ -63,14 +65,14 @@ public:
 
     /// @brief Discard any pending value
     void reset() {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         this->slot_ = T{};
         this->dirty_ = false;
     }
 
 private:
     // Struct fields
-    std::mutex mutex_;
+    PlatformMutex mutex_;
     T slot_{};
 
     // 8-bit fields

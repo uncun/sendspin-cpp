@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 
 #include <algorithm>
@@ -166,7 +167,7 @@ public:
     /// @param event Event to append.
     /// @return true if the event was appended, false if the ring was full.
     bool push_event(const InboxEvent& event) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         if (this->count_ >= EVENT_CAPACITY) {
             return false;
         }
@@ -184,7 +185,7 @@ public:
     /// drained; a partial drain (max_count smaller than the pending count) leaves the bit set so
     /// the remaining events are not silently missed on the next poll().
     size_t take_events(InboxEvent* out, size_t max_count) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         size_t n = std::min(max_count, this->count_);
         for (size_t i = 0; i < n; ++i) {
             out[i] = this->events_[(this->head_ + i) % EVENT_CAPACITY];
@@ -199,7 +200,7 @@ public:
 
     /// @brief Discards all pending ring events
     void reset_events() {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         this->head_ = 0;
         this->count_ = 0;
         this->clear_bit_locked(INBOX_TOPIC_EVENTS);
@@ -220,7 +221,7 @@ private:
     ///
     /// Enforces InboxSlot's exclusive-ownership invariant; asserts in debug, no-op in release.
     void claim_bit(uint32_t bit) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         assert((this->claimed_bits_ & bit) == 0 && "INBOX_TOPIC bit already claimed by a slot");
         this->claimed_bits_ |= bit;
     }
@@ -228,12 +229,12 @@ private:
     /// @brief Releases a slot's bit claim (called from ~InboxSlot(), which must run before this
     /// Inbox is destroyed)
     void release_bit(uint32_t bit) {
-        std::lock_guard<std::mutex> lock(this->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->mutex_);
         this->claimed_bits_ &= ~bit;
     }
 
     // Struct fields
-    std::mutex mutex_;
+    PlatformMutex mutex_;
     std::array<InboxEvent, EVENT_CAPACITY> events_{};
 
     // size_t fields
@@ -349,7 +350,7 @@ public:
             // the claim; without this a slot destroyed while dirty would leave its bit set in
             // pending_ forever, a phantom wakeup a replacement slot inherits but never clears.
             {
-                std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+                std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
                 if (this->dirty_) {
                     this->inbox_->clear_bit_locked(this->topic_bit_);
                 }
@@ -384,7 +385,7 @@ public:
         if (!this->check_bound()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         this->slot_ = std::move(value);
         this->dirty_ = true;
         this->inbox_->set_bit_locked(this->topic_bit_);
@@ -410,7 +411,7 @@ public:
         if (!this->check_bound()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         fn(this->slot_);
         this->dirty_ = true;
         this->inbox_->set_bit_locked(this->topic_bit_);
@@ -426,7 +427,7 @@ public:
         if (!this->check_bound()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         if (!this->dirty_ || fn(this->slot_)) {
             return;
         }
@@ -471,7 +472,7 @@ public:
         if (!this->check_bound()) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         if (!this->dirty_) {
             return false;
         }
@@ -508,7 +509,7 @@ public:
         if (!this->check_bound()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         this->slot_ = T{};
         this->dirty_ = false;
         this->inbox_->clear_bit_locked(this->topic_bit_);

@@ -18,7 +18,9 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
 #include "platform/event_flags.h"
+#include "platform/thread.h"
 #include "protocol_messages.h"
 #include "sendspin/config.h"
 #include "sendspin/controller_role.h"
@@ -291,13 +293,13 @@ private:
     std::unique_ptr<ProtocolCommand[]> commands_;
     /// Guards commands_, the counts, latest_state_, requests_ and the writes to accepting_. A
     /// leaf: no lock is taken and nothing heap-backed is destroyed under it.
-    std::mutex command_mutex_;
+    PlatformMutex command_mutex_;
     /// Created in the constructor, before any thread that wakes the task exists.
     EventFlags event_flags_;
     /// The newest client/state snapshot not yet taken. Written by the main loop, taken by the
     /// protocol task; guarded by command_mutex_.
     std::optional<ClientStateMessage> latest_state_;
-    std::thread thread_;
+    PlatformThread thread_;
     /// The protocol work, set by start() before the thread exists and read only by the thread.
     Tick tick_;
     /// The lifecycle requests posted since the last take. Merged from any thread, taken by the

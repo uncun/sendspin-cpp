@@ -16,6 +16,7 @@
 
 #include "audio_utils.h"
 #include "constants.h"
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 #include "platform/thread.h"
 #include "platform/time.h"
@@ -131,7 +132,7 @@ bool SyncTask::start(InboundRing* ring, bool task_stack_in_psram, unsigned prior
     platform_configure_thread("SsSync", SYNC_TASK_STACK_SIZE, static_cast<int>(priority),
                               task_stack_in_psram);
 
-    this->sync_thread_ = std::thread(thread_entry, this);
+    this->sync_thread_ = PlatformThread(thread_entry, this);
 
     // Wait for the thread to reach IDLE before returning
     this->event_flags_.wait(EventGroupBits::TASK_IDLE | EventGroupBits::TASK_STOPPED, false, false,
@@ -244,7 +245,7 @@ SyncTaskState SyncTask::handle_load_chunk(SyncContext& sync_context) {
         // Wait for the time filter to receive its first measurement before processing audio chunks.
         // Without a valid time offset, server timestamps can't be correctly converted to client
         // timestamps.
-        std::this_thread::sleep_for(std::chrono::milliseconds(WAIT_FOR_TIME_SYNC_MS));
+        platform_sleep_for(std::chrono::milliseconds(WAIT_FOR_TIME_SYNC_MS));
         return SyncTaskState::LOAD_CHUNK;
     }
     if (!this->load_next_chunk(sync_context)) {
@@ -432,7 +433,7 @@ void SyncTask::send_pending_silence(SyncContext& sync_context) {
 
     if ((bytes_written > 0) && sync_context.initial_decode) {
         // Sent priming zeros - delay slightly to give the audio stack time to start consuming
-        std::this_thread::sleep_for(std::chrono::milliseconds(
+        platform_sleep_for(std::chrono::milliseconds(
             std::max<uint32_t>(INITIAL_SYNC_SETTLE_MIN_MS,
                                sync_context.current_stream_info.bytes_to_ms(bytes_written) / 2)));
     }

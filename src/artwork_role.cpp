@@ -15,6 +15,7 @@
 #include "artwork_role_impl.h"
 #include "constants.h"
 #include "crypto/constants.h"
+#include "platform/concurrency.h"
 #include "platform/logging.h"
 #include "platform/thread.h"
 #include "platform/time.h"
@@ -143,7 +144,7 @@ bool ArtworkRole::Impl::start(InboundRing* ring) {
 
     platform_configure_thread("SsArt", 4096, static_cast<int>(this->config.priority),
                               this->config.psram_stack);
-    this->drain_task->drain_thread = std::thread(drain_thread_func, this);
+    this->drain_task->drain_thread = PlatformThread(drain_thread_func, this);
     return true;
 }
 
@@ -612,7 +613,7 @@ void ArtworkRole::Impl::clear_every_channel() {
         // clear, and the decode thread, woken below, drops it from its buffer. Released before
         // firing the callbacks below so a listener calling frame_done() from inside
         // on_image_clear() does not deadlock on this same mutex.
-        std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+        std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
         // Sweep the whole fixed-size slot_gates array (ARTWORK_MAX_SLOTS): ack_enabled() already
         // gates the PRESENTED arm to configured ack slots, and clearing has_parked on any others
         // is a harmless reset (they never park).
@@ -691,7 +692,7 @@ void ArtworkRole::Impl::drain_events() {
             if (this->ack_enabled(slot)) {
                 bool should_wake = false;
                 {
-                    std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+                    std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
                     auto& gate = this->drain_task->slot_gates[slot];
                     // The consumer got a decode whose display will never fire now; release the
                     // gate so the slot does not wedge on this stream restart. PRESENTED is left
@@ -726,7 +727,7 @@ void ArtworkRole::Impl::drain_events() {
             // mutex before invoking it: frame_done() may be called synchronously from inside
             // on_image_display()/on_image_clear(), which would deadlock if this mutex were still
             // held.
-            std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+            std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
             this->drain_task->slot_gates[slot].ack_state = SlotAckState::PRESENTED;
         }
         if (this->listener) {
@@ -778,7 +779,7 @@ void ArtworkRole::Impl::frame_done(uint8_t slot) const {
 
     bool should_wake = false;
     {
-        std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+        std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
         auto& gate = this->drain_task->slot_gates[slot];
         if (gate.ack_state == SlotAckState::IDLE) {
             // Safe no-op: nothing un-acked for this slot, whether because require_frame_done is
@@ -890,7 +891,7 @@ void ArtworkRole::Impl::add_part(uint8_t slot, void* item) {
 
 void ArtworkRole::Impl::drop_assembly(uint8_t slot, bool release_delivered) const {
     this->drain_task->assemblies[slot].state = ArtworkAssembly::State::IDLE;
-    std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+    std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
     auto& gate = this->drain_task->slot_gates[slot];
     gate.has_parked = false;
     if (release_delivered && gate.ack_state == SlotAckState::DECODE_DELIVERED) {
@@ -915,7 +916,7 @@ void ArtworkRole::Impl::deliver(uint8_t slot) {
         // un-acked one. Arming gates on ack_enabled() alone, matching drain_events() and
         // clear_every_channel(); the listener is set before start() (see set_listener), and the
         // callback below is the crash-guard for that pointer.
-        std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+        std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
         auto& gate = this->drain_task->slot_gates[slot];
         if (this->ack_enabled(slot)) {
             if (gate.ack_state != SlotAckState::IDLE) {
@@ -969,7 +970,7 @@ void ArtworkRole::Impl::sweep_parked() {
         bool dropped = false;
         bool open = false;
         {
-            std::lock_guard<std::mutex> lock(this->drain_task->slot_mutex);
+            std::lock_guard<PlatformMutex> lock(this->drain_task->slot_mutex);
             auto& gate = this->drain_task->slot_gates[slot];
             // The main loop clearing has_parked drops the parked image.
             dropped = !gate.has_parked;

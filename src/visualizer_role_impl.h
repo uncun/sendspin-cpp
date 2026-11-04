@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
+#include "platform/thread.h"
 #include "inbound_ring.h"
 #include "inbox.h"
 #include "protocol_messages.h"
@@ -102,7 +104,7 @@ struct VisualizerRole::Impl : RoleTeardown {
     struct DrainTask {
         /// Its item list's flags also carry the drain thread's command bits.
         InboundConsumer inbound;
-        std::thread drain_thread;
+        PlatformThread drain_thread;
         /// The bins on_spectrum() receives, reserved by start() for configured_spectrum_bins(),
         /// beyond which no spectrum is admitted, so the drain thread never grows it. Main loop in
         /// start() before the thread is spawned, then the drain thread.

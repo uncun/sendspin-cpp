@@ -18,9 +18,25 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 
-#ifdef ESP_PLATFORM
+#ifdef __ZEPHYR__
+#include "platform/zephyr/thread.h"
+#else
+#include <thread>
+namespace sendspin {
+using PlatformThread = std::thread;
+template <class Rep, class Period>
+inline void platform_sleep_for(std::chrono::duration<Rep, Period> duration) {
+    std::this_thread::sleep_for(duration);
+}
+}  // namespace sendspin
+#endif
+
+#if defined(__ZEPHYR__)
+// Native implementation included above.
+#elif defined(ESP_PLATFORM)
 
 #include "platform/logging.h"
 #include <esp_heap_caps.h>

@@ -36,6 +36,8 @@
 
 #pragma once
 
+#include "platform/concurrency.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -295,7 +297,7 @@ public:
         if (!SharedRingLayout::is_valid_storage_size(size)) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         this->storage_ = storage;
         this->size_ = size;
         this->max_item_size_ = SharedRingLayout::max_item_size(size);
@@ -312,20 +314,20 @@ public:
 
     /// @brief Whether create() succeeded
     bool is_created() const {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         return this->storage_ != nullptr;
     }
 
     /// @brief The storage passed to create(), or nullptr before it
     uint8_t* storage() const {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         return this->storage_;
     }
 
     /// @brief Whether `item` is the item placed at the very start of the storage (see
     /// InboundRing; the host never hands it out uncompleted)
     bool is_storage_head(const void* item) const {
-        std::lock_guard<std::mutex> lock(this->mtx_);
+        std::lock_guard<PlatformMutex> lock(this->mtx_);
         return item == this->storage_ + SharedRingLayout::ITEM_HEADER_BYTES;
     }
 
@@ -335,7 +337,7 @@ public:
     ///        indefinitely. An item larger than SharedRingLayout::max_item_size() fails at once.
     /// @return The item's bytes, to be filled and passed to complete(), or nullptr.
     void* acquire(size_t size, uint32_t timeout_ms) {
-        std::unique_lock<std::mutex> lock(this->mtx_);
+        std::unique_lock<PlatformMutex> lock(this->mtx_);
         if (this->storage_ == nullptr || size > this->max_item_size_) {
             return nullptr;
         }
@@ -358,7 +360,7 @@ public:
     /// waiting in wait_for_completion() sees every completion. The producer that acquired it.
     void complete(void* ptr) {
         {
-            std::lock_guard<std::mutex> lock(this->mtx_);
+            std::lock_guard<PlatformMutex> lock(this->mtx_);
             assert((header_of(ptr)->flags & FLAG_WRITTEN) == 0 && "item completed twice");
             header_of(ptr)->flags |= FLAG_WRITTEN;
             ++this->items_waiting_;
@@ -390,7 +392,7 @@ public:
     /// @return The item's bytes, valid until return_item(), or nullptr on timeout or on a
     ///         wake_receiver() interruption.
     void* take(size_t* item_size, uint32_t timeout_ms) {
-        std::unique_lock<std::mutex> lock(this->mtx_);
+        std::unique_lock<PlatformMutex> lock(this->mtx_);
         if (this->item_available()) {
             return this->take_item(item_size);
         }
@@ -416,7 +418,7 @@ public:
         if (timeout_ms == 0) {
             return;
         }
-        std::unique_lock<std::mutex> lock(this->mtx_);
+        std::unique_lock<PlatformMutex> lock(this->mtx_);
         // Mirrors the ESP binary semaphore: a completion since the last wait leaves a token, so
         // one that lands between the caller's check and this wait still ends it.
         auto ready = [&] { return this->completion_token_ || this->wake_pending_; };
@@ -433,7 +435,7 @@ public:
     /// collapse. Any thread.
     void wake_receiver() {
         {
-            std::lock_guard<std::mutex> lock(this->mtx_);
+            std::lock_guard<PlatformMutex> lock(this->mtx_);
             this->wake_pending_ = true;
         }
         this->cv_items_.notify_all();
@@ -443,7 +445,7 @@ public:
     /// Its space is reclaimed only once every older item has been returned too.
     void return_item(void* ptr) {
         {
-            std::lock_guard<std::mutex> lock(this->mtx_);
+            std::lock_guard<PlatformMutex> lock(this->mtx_);
             assert((header_of(ptr)->flags & FLAG_FREE) == 0 && "item returned twice");
             header_of(ptr)->flags |= FLAG_FREE;
 
@@ -576,11 +578,11 @@ private:
 
     // Struct fields
     /// Signalled by complete() and wake_receiver(); a blocking take() waits on it.
-    std::condition_variable cv_items_;
+    PlatformConditionVariable cv_items_;
     /// Signalled by return_item(); a blocking acquire() waits on it.
-    std::condition_variable cv_space_;
+    PlatformConditionVariable cv_space_;
     /// Guards every field below. A leaf: nothing is called under it.
-    mutable std::mutex mtx_;
+    mutable PlatformMutex mtx_;
 
     // Pointer fields
     uint8_t* storage_{nullptr};
