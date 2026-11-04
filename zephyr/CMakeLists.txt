@@ -13,15 +13,25 @@ get_filename_component(SENDSPIN_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 # Dependencies are fetched by west update, never at CMake configure time. Ask west
 # for paths so manifest path overrides and import path-prefix work as expected.
 function(sendspin_dependency variable project)
+    if(DEFINED ENV{${variable}} AND NOT DEFINED ${variable})
+        set(${variable} "$ENV{${variable}}" CACHE PATH "Path to ${project}")
+    endif()
     if(NOT DEFINED ${variable})
+        set(result 1)
         if(WEST)
             execute_process(COMMAND ${WEST} list ${project} -f "{abspath}"
                 WORKING_DIRECTORY ${WEST_TOPDIR}
                 OUTPUT_VARIABLE dependency_dir OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE result ERROR_QUIET)
         endif()
-        if(NOT WEST OR NOT result EQUAL 0 OR NOT IS_DIRECTORY "${dependency_dir}")
-            message(FATAL_ERROR "Missing ${project}: import sendspin-cpp's west.yml and run west update, or set ${variable}")
+        if(NOT result EQUAL 0 OR NOT IS_DIRECTORY "${dependency_dir}")
+            if(DEFINED WEST_TOPDIR AND IS_DIRECTORY "${WEST_TOPDIR}/modules/lib/${project}")
+                set(dependency_dir "${WEST_TOPDIR}/modules/lib/${project}")
+            elseif(DEFINED ZEPHYR_BASE AND IS_DIRECTORY "${ZEPHYR_BASE}/../modules/lib/${project}")
+                set(dependency_dir "${ZEPHYR_BASE}/../modules/lib/${project}")
+            else()
+                message(FATAL_ERROR "Missing ${project}: import sendspin-cpp's west.yml and run west update, or set ${variable}")
+            endif()
         endif()
         set(${variable} "${dependency_dir}" CACHE PATH "Path to ${project}")
     endif()
@@ -33,6 +43,7 @@ sendspin_dependency(SENDSPIN_NOISE_DIR noise-c)
 include(${SENDSPIN_ROOT}/cmake/sources.cmake)
 sendspin_get_sources(${SENDSPIN_ROOT})
 zephyr_library_named(sendspin)
+zephyr_library_compile_options(-UESP_PLATFORM)
 zephyr_library_sources(${SENDSPIN_CORE_SOURCES}
     ${SENDSPIN_ROOT}/src/zephyr/client_connection.cpp
     ${SENDSPIN_ROOT}/src/zephyr/network_info.cpp
@@ -58,7 +69,7 @@ if(CONFIG_SENDSPIN_ENABLE_PLAYER OR CONFIG_SENDSPIN_ENABLE_SOURCE)
     zephyr_library_sources(${FLAC_SOURCES})
     zephyr_library_include_directories(${SENDSPIN_MICRO_FLAC_DIR}/include
         ${SENDSPIN_MICRO_FLAC_DIR}/src)
-    zephyr_library_compile_definitions(MICRO_FLAC_DISABLE_OGG)
+    zephyr_library_compile_definitions(MICRO_FLAC_DISABLE_OGG MICRO_FLAC_DISABLE_XTENSA_ASM)
 endif()
 
 # noise-c only ships an ESP-IDF build. Use its reference ChaChaPoly/25519/SHA256
