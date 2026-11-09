@@ -47,7 +47,16 @@ zephyr_library_compile_options(-UESP_PLATFORM)
 zephyr_library_sources(${SENDSPIN_CORE_SOURCES}
     ${SENDSPIN_ROOT}/src/zephyr/client_connection.cpp
     ${SENDSPIN_ROOT}/src/zephyr/network_info.cpp
-    ${SENDSPIN_ROOT}/src/zephyr/noise_rand.cpp)
+    ${SENDSPIN_ROOT}/src/zephyr/noise_rand.cpp
+    ${SENDSPIN_ROOT}/src/zephyr/logging.cpp)
+if(CONFIG_SENDSPIN_BUFFER_HEAP_SIZE GREATER 0)
+    zephyr_library_sources(${SENDSPIN_ROOT}/src/zephyr/memory.cpp)
+endif()
+if(CONFIG_SENDSPIN_KERNEL_MALLOC)
+    zephyr_library_sources(${SENDSPIN_ROOT}/src/zephyr/malloc.c)
+    target_link_options(zephyr_interface INTERFACE
+        -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free)
+endif()
 zephyr_library_include_directories(${SENDSPIN_ROOT}/src ${SENDSPIN_ROOT}/src/zephyr
     ${SENDSPIN_NOISE_DIR}/include ${SENDSPIN_ARDUINOJSON_DIR}/src)
 zephyr_include_directories(${SENDSPIN_ROOT}/include)

@@ -60,4 +60,24 @@ config SENDSPIN_THREAD_PRIORITY
 	  Corresponds to Sendspin priority 5. Larger Sendspin priorities get
 	  smaller Zephyr priority numbers, clamped to the available range.
 
+config SENDSPIN_BUFFER_HEAP_SIZE
+	int "Dedicated Sendspin buffer heap size"
+	default 0
+	range 0 4194304
+	help
+	  Reserve a bounded heap for platform buffers, in PSRAM when ESP_SPIRAM
+	  is enabled. Zero uses the C heap. Internal placement preferences use
+	  the same buffer heap; thread control blocks and C++ objects do not.
+
+config SENDSPIN_KERNEL_MALLOC
+	bool "Use the kernel heap for C/C++ allocation"
+	depends on !NATIVE_BUILD
+	help
+	  Wrap malloc, calloc, realloc and free with the kernel allocator for
+	  the whole application. Set COMMON_LIBC_MALLOC_ARENA_SIZE to zero.
+
+module = SENDSPIN
+module-str = sendspin
+source "subsys/logging/Kconfig.template.log_config"
+
 endif

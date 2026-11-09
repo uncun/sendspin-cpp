@@ -80,8 +80,15 @@ by default). Larger per-role stack requests are honored. Dynamic stacks come
 from the kernel heap; C++ objects, Noise state, JSON and audio buffers come from
 the C heap. Size both heaps and role buffer capacities for the application.
 Artwork and audio defaults can exceed MCU RAM: configure them explicitly and
-check `start()` failures. Memory placement preferences and PSRAM flags have no
-effect on Zephyr; allocations use the configured libc heap.
+check `start()` failures. By default, allocations use the configured libc heap. An optional
+`CONFIG_SENDSPIN_BUFFER_HEAP_SIZE` reserves a separate platform-buffer heap,
+placed in PSRAM with `CONFIG_ESP_SPIRAM`. Both placement preferences use this
+heap. `CONFIG_SENDSPIN_KERNEL_MALLOC` redirects application-wide C allocations
+to the kernel heap; set `CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=0` when using it.
+Thread stacks still use the kernel heap and ignore per-role PSRAM flags.
+
+Library diagnostics use Zephyr logging, controlled by `CONFIG_SENDSPIN_LOG_LEVEL`.
+The runtime log-level setter has no effect on Zephyr.
 
 `CONFIG_SENDSPIN_THREAD_PRIORITY` sets the base Zephyr priority for Sendspin's
 priority 5. Higher Sendspin priorities map to lower Zephyr priority numbers,

@@ -23,7 +23,9 @@
 #include <cstddef>
 #include <cstdlib>
 
-#ifdef ESP_PLATFORM
+#if defined(__ZEPHYR__) && CONFIG_SENDSPIN_BUFFER_HEAP_SIZE > 0
+#include "zephyr/memory.h"
+#elif defined(ESP_PLATFORM)
 
 #include <esp_heap_caps.h>
 
