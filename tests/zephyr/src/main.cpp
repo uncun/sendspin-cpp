@@ -1,6 +1,7 @@
 // Copyright 2026 Sendspin Contributors
 // SPDX-License-Identifier: Apache-2.0
 #include "platform/event_flags.h"
+#include "platform/memory.h"
 #include "platform/shared_ring_buffer.h"
 #include "platform/thread.h"
 #include "platform/time.h"
@@ -96,6 +97,26 @@ ZTEST(sendspin_zephyr, test_cycle_counter_wrap_and_idle) {
     zassert_equal(clock.update(0x74, 32 + idle), start + 32 + idle);
     // A coarse tick boundary may put uptime slightly ahead of the cycle delta.
     zassert_equal(clock.update(0x78, 32 + idle + 1000), start + 32 + idle + 4);
+}
+
+ZTEST(sendspin_zephyr, test_buffer_heap_realloc_and_exhaustion) {
+    platform_free(nullptr);
+    auto* data = static_cast<uint8_t*>(platform_realloc(nullptr, 128));
+    zassert_not_null(data);
+    std::memset(data, 0x5a, 128);
+    auto* grown = static_cast<uint8_t*>(platform_realloc(data, 256));
+    zassert_not_null(grown);
+    for (size_t i = 0; i < 128; ++i) {
+        zassert_equal(grown[i], 0x5a);
+    }
+#if CONFIG_SENDSPIN_BUFFER_HEAP_SIZE > 0
+    zassert_is_null(platform_realloc(grown, CONFIG_SENDSPIN_BUFFER_HEAP_SIZE * 2));
+    zassert_equal(grown[0], 0x5a);
+#endif
+    platform_free(grown);
+    void* internal = platform_malloc_internal(128);
+    zassert_not_null(internal);
+    platform_free(internal);
 }
 
 ZTEST_SUITE(sendspin_zephyr, nullptr, nullptr, nullptr, nullptr, nullptr);

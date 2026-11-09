@@ -17,7 +17,27 @@
 
 #pragma once
 
-#ifdef ESP_PLATFORM
+#if defined(__ZEPHYR__)
+#include <zephyr/logging/log.h>
+
+#include <cinttypes>
+LOG_MODULE_DECLARE(sendspin_cpp, CONFIG_SENDSPIN_LOG_LEVEL);
+#define SS_LOGE(tag, fmt, ...) LOG_ERR("%s: " fmt, tag __VA_OPT__(, ) __VA_ARGS__)
+#define SS_LOGW(tag, fmt, ...) LOG_WRN("%s: " fmt, tag __VA_OPT__(, ) __VA_ARGS__)
+#define SS_LOGI(tag, fmt, ...) LOG_INF("%s: " fmt, tag __VA_OPT__(, ) __VA_ARGS__)
+#define SS_LOGD(tag, fmt, ...) LOG_DBG("%s: " fmt, tag __VA_OPT__(, ) __VA_ARGS__)
+#define SS_LOGV(tag, fmt, ...) LOG_DBG("%s: " fmt, tag __VA_OPT__(, ) __VA_ARGS__)
+namespace sendspin {
+inline void platform_set_log_level(int) {}
+inline int platform_get_log_level() {
+#ifdef CONFIG_SENDSPIN_LOG_LEVEL
+    return CONFIG_SENDSPIN_LOG_LEVEL;
+#else
+    return 0;
+#endif
+}
+}  // namespace sendspin
+#elif defined(ESP_PLATFORM)
 
 #include <esp_log.h>
 
