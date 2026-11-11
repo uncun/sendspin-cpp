@@ -43,12 +43,14 @@ sendspin_dependency(SENDSPIN_NOISE_DIR noise-c)
 include(${SENDSPIN_ROOT}/cmake/sources.cmake)
 sendspin_get_sources(${SENDSPIN_ROOT})
 zephyr_library_named(sendspin)
+zephyr_library_link_libraries(mbedTLS)
 zephyr_library_compile_options(-UESP_PLATFORM)
 zephyr_library_sources(${SENDSPIN_CORE_SOURCES}
     ${SENDSPIN_ROOT}/src/zephyr/client_connection.cpp
     ${SENDSPIN_ROOT}/src/zephyr/network_info.cpp
     ${SENDSPIN_ROOT}/src/zephyr/noise_rand.cpp
-    ${SENDSPIN_ROOT}/src/zephyr/logging.cpp)
+    ${SENDSPIN_ROOT}/src/zephyr/logging.cpp
+    ${SENDSPIN_ROOT}/src/zephyr/thread_stack.cpp)
 if(CONFIG_SENDSPIN_BUFFER_HEAP_SIZE GREATER 0)
     zephyr_library_sources(${SENDSPIN_ROOT}/src/zephyr/memory.cpp)
 endif()

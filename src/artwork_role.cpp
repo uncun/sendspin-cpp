@@ -142,9 +142,17 @@ bool ArtworkRole::Impl::start(InboundRing* ring) {
     // So a restart inherits no command from the previous run.
     this->drain_task->inbound.items().clear_signals();
 
-    platform_configure_thread("SsArt", 4096, static_cast<int>(this->config.priority),
-                              this->config.psram_stack);
-    this->drain_task->drain_thread = PlatformThread(drain_thread_func, this);
+    this->drain_task->drain_thread =
+        platform_create_thread({.name = "SsArt",
+                                .stack_size = 4096,
+                                .priority = static_cast<int>(this->config.priority),
+                                .stack_in_psram = this->config.psram_stack},
+                               drain_thread_func, this);
+    if (!this->drain_task->drain_thread.joinable()) {
+        this->drain_task->inbound.unbind();
+        release_buffers();
+        return false;  // The platform logs the allocation failure.
+    }
     return true;
 }
 

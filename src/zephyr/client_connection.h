@@ -40,32 +40,38 @@ private:
 
     void run();
     bool open();
-    bool connect_tcp(const std::string& host, const std::string& port);
+    bool connect_tcp(const char* host, const char* port);
     bool connect_address(const zsock_addrinfo& address);
     bool wait_for_connection(int fd);
-    bool upgrade_websocket(const std::string& authority, const std::string& target);
+    bool upgrade_websocket(const char* authority, const char* target);
     void close_sockets();
 
     void receive();
-    bool receive_control_frame(ReceiveState& state, const uint8_t* data, size_t len,
-                               uint32_t type, uint64_t remaining);
-    bool receive_data_frame(ReceiveState& state, const uint8_t* data, size_t len,
-                            uint32_t type, uint64_t remaining);
-    bool receive_single_frame(ReceiveState& state, const uint8_t* data, size_t len,
-                              bool frame_end);
+    bool receive_control_frame(ReceiveState& state, const uint8_t* data, size_t len, uint32_t type,
+                               uint64_t remaining);
+    bool receive_data_frame(ReceiveState& state, const uint8_t* data, size_t len, uint32_t type,
+                            uint64_t remaining);
+    bool receive_single_frame(ReceiveState& state, const uint8_t* data, size_t len, bool frame_end);
     bool receive_fragment(const uint8_t* data, size_t len, bool first, bool text, bool last);
     SsErr send_frame(const uint8_t* data, size_t len, websocket_opcode opcode);
 
     std::string url_;
     PlatformThread thread_;
+    // Transport I/O exception to the leaf-lock rule (docs/conventions.md): serializes
+    // protocol-task writes, receive-thread pongs and socket destruction. No library
+    // state lock is held when taking it; explicit frame writes use IO_TIMEOUT_MS.
     PlatformMutex send_mutex_;
+    // Opened and closed by the receive thread; ws_socket_ is also read by senders
+    // under send_mutex_ after connected_ publishes the successful upgrade.
     int tcp_socket_{-1};
     int ws_socket_{-1};
     unsigned priority_{5};
     size_t stack_size_{CONFIG_SENDSPIN_THREAD_STACK_SIZE};
     // Must live for the entire WebSocket session, not just the HTTP upgrade.
     uint8_t http_buffer_[1024]{};
+    // Receive thread publishes upgrade; any sender/closer may clear it; any thread reads.
     std::atomic<bool> connected_{false};
+    // Any closer writes true; receive thread and senders read it. Never reset.
     std::atomic<bool> stop_{false};
 };
 

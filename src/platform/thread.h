@@ -13,10 +13,10 @@
 // limitations under the License.
 
 /// @file thread.h
-/// @brief Platform-abstracted thread configuration helper for setting stack size, priority, name,
-/// and PSRAM stack allocation before spawning a std::thread, and the yield-window sleep
-
+/// @brief Native threads, explicit creation parameters, and sleep helpers.
 #pragma once
+
+#include "platform/thread_config.h"
 
 #include <chrono>
 #include <cstddef>
@@ -35,42 +35,44 @@ inline void platform_sleep_for(std::chrono::duration<Rep, Period> duration) {
 }  // namespace sendspin
 #endif
 
-#if defined(__ZEPHYR__)
-// Native implementation included above.
-#elif defined(ESP_PLATFORM)
-
+#if defined(ESP_PLATFORM) && !defined(__ZEPHYR__)
 #include "platform/logging.h"
 #include "platform/time.h"
 #include <esp_heap_caps.h>
 #include <esp_pthread.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#endif
 
 namespace sendspin {
-
-/// @brief Configures the next std::thread created on this calling thread
-/// On ESP-IDF, sets stack size, priority, name, and optionally SPIRAM stack allocation
-/// via esp_pthread_set_cfg.
-/// @param name Thread name shown in the RTOS task list.
-/// @param stack_size Stack size in bytes.
-/// @param priority FreeRTOS task priority.
-/// @param stack_in_psram If true, allocates the stack in PSRAM.
-inline void platform_configure_thread(const char* name, size_t stack_size, int priority,
-                                      bool stack_in_psram) {
+// Creation and configuration are one operation: concurrent callers never share pending parameters.
+template <class Function, class Argument>
+PlatformThread platform_create_thread([[maybe_unused]] const ThreadConfig& config,
+                                      Function function, Argument argument) {
+#ifdef __ZEPHYR__
+    return PlatformThread(config, function, argument);
+#else
+#ifdef ESP_PLATFORM
     esp_pthread_cfg_t cfg = esp_pthread_get_default_config();
-    cfg.stack_size = stack_size;
-    cfg.prio = priority;
-    cfg.thread_name = name;
-    if (stack_in_psram) {
-        // esp_pthread_set_cfg() rejects stack caps without MALLOC_CAP_8BIT.
+    cfg.stack_size = config.stack_size;
+    cfg.prio = config.priority;
+    cfg.thread_name = config.name;
+    if (config.stack_in_psram) {
         cfg.stack_alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     }
-    // A rejected config leaves the calling thread's previous (or the default) one in place.
     if (esp_pthread_set_cfg(&cfg) != ESP_OK) {
         SS_LOGE("sendspin.thread",
-                "%s config rejected; it starts with the previous or default config", name);
+                "%s config rejected; it starts with the previous or default config", config.name);
     }
+#endif
+    return PlatformThread(function, argument);
+#endif
 }
+
+}  // namespace sendspin
+
+#if defined(ESP_PLATFORM) && !defined(__ZEPHYR__)
+namespace sendspin {
 
 /// @brief Blocks the calling thread for at least `duration_us`, and at least until the next tick,
 /// so the tasks below its priority run; it wakes at the first tick at or after the deadline.
@@ -103,27 +105,14 @@ inline void platform_yield_window_sleep(int64_t duration_us) {
 
 }  // namespace sendspin
 
-#else  // Host
-
-#include <chrono>
-#include <thread>
+#else  // Host or Zephyr
 
 namespace sendspin {
-
-/// @brief No-op on host; std::thread uses OS-default stack and scheduling
-/// @param name Ignored on host.
-/// @param stack_size Ignored on host.
-/// @param priority Ignored on host.
-/// @param stack_in_psram Ignored on host.
-inline void platform_configure_thread(const char* /*name*/, size_t /*stack_size*/, int /*priority*/,
-                                      bool /*stack_in_psram*/) {
-    // No-op on host - std::thread uses OS defaults.
-}
 
 /// @brief Blocks the calling thread for at least `duration_us`
 /// @param duration_us Time to block for.
 inline void platform_sleep_blocking_us(int64_t duration_us) {
-    std::this_thread::sleep_for(std::chrono::microseconds(duration_us));
+    platform_sleep_for(std::chrono::microseconds(duration_us));
 }
 
 /// @brief Whether the yield windows apply (see yield_window.h): not on host, where the OS

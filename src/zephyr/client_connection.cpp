@@ -4,6 +4,8 @@
 
 #include "platform/logging.h"
 #include "platform/time.h"
+#include "websocket_reader.h"
+#include "websocket_url.h"
 #include <psa/crypto.h>
 
 #include <cerrno>
@@ -18,63 +20,6 @@ constexpr int OPEN_TIMEOUT_MS = 5000;
 constexpr int RECEIVE_TIMEOUT_MS = 100;
 const char* const TAG = "sendspin.zephyr";
 
-struct WebSocketUrl {
-    std::string authority;
-    std::string host;
-    std::string port{"80"};
-    std::string target;
-};
-
-bool parse_authority(WebSocketUrl& parsed) {
-    const auto& authority = parsed.authority;
-    if (authority.empty() || authority.find('@') != std::string::npos) {
-        return false;
-    }
-    if (authority.front() == '[') {
-        const size_t end = authority.find(']');
-        if (end == std::string::npos) {
-            return false;
-        }
-        parsed.host = authority.substr(1, end - 1);
-        if (end + 1 < authority.size()) {
-            if (authority[end + 1] != ':') {
-                return false;
-            }
-            parsed.port = authority.substr(end + 2);
-        }
-    } else {
-        const size_t colon = authority.find(':');
-        parsed.host = authority.substr(0, colon);
-        if (colon != std::string::npos) {
-            parsed.port = authority.substr(colon + 1);
-        }
-    }
-    if (parsed.host.empty() || parsed.port.empty() || parsed.port.size() > 5 ||
-        parsed.port.find_first_not_of("0123456789") != std::string::npos) {
-        return false;
-    }
-    const unsigned long port = std::strtoul(parsed.port.c_str(), nullptr, 10);
-    return port > 0 && port <= 65535;
-}
-
-bool parse_url(const std::string& url, WebSocketUrl& parsed) {
-    // Deliberately reject TLS, credentials and fragments. Bracketed IPv6 literals and
-    // DNS names are accepted. A query belongs to the request target, not the authority.
-    if (!url.starts_with("ws://") || url.find('#') != std::string::npos) {
-        return false;
-    }
-    const size_t target_pos = url.find_first_of("/?#", 5);
-    parsed.authority =
-        url.substr(5, target_pos == std::string::npos ? std::string::npos : target_pos - 5);
-    if (!parse_authority(parsed)) {
-        return false;
-    }
-    parsed.target = target_pos == std::string::npos ? "/" : url.substr(target_pos);
-    if (parsed.target.front() == '?') {
-        parsed.target.insert(0, "/");
-    }
-    return true;
-}
 }  // namespace
 
 SendspinClientConnection::SendspinClientConnection(std::string url) : url_(std::move(url)) {}
@@ -90,8 +35,16 @@ void SendspinClientConnection::start() {
     if (thread_.joinable()) {
         return;
     }
-    platform_configure_thread("SsWs", stack_size_, static_cast<int>(priority_), false);
-    thread_ = PlatformThread([](SendspinClientConnection* self) { self->run(); }, this);
+    thread_ = platform_create_thread(
+        {.name = "SsWs",
+         .stack_size = stack_size_,
+         .priority = static_cast<int>(priority_),
+         .stack_in_psram = false},
+        [](SendspinClientConnection* self) { self->run(); }, this);
+    if (!thread_.joinable()) {
+        close_transport_now();
+        notify_transport_closed();
+    }
 }
 
 void SendspinClientConnection::close_transport_now() {
@@ -133,9 +86,36 @@ SsErr SendspinClientConnection::send_frame(const uint8_t* data, size_t len,
 
 bool SendspinClientConnection::open() {
     psa_crypto_init();
-    WebSocketUrl parsed;
-    return parse_url(url_, parsed) && connect_tcp(parsed.host, parsed.port) &&
-           upgrade_websocket(parsed.authority, parsed.target);
+    const auto parsed = parse_websocket_url(url_);
+    if (!parsed) {
+        return false;
+    }
+    // Zephyr's DNS and HTTP APIs need NUL-terminated strings. One fallible platform
+    // allocation holds their views for the upgrade; no std::string copies are made.
+    PlatformBuffer strings;
+    const bool query_only = parsed->target.front() == '?';
+    if (!strings.allocate(parsed->authority.size() + parsed->host.size() + parsed->port.size() +
+                              parsed->target.size() + query_only + 4,
+                          MemoryLocation::PREFER_INTERNAL)) {
+        SS_LOGW(TAG, "No memory for the WebSocket URL");
+        return false;
+    }
+    char* next = reinterpret_cast<char*>(strings.data());
+    const auto copy = [&next](std::string_view text, bool slash = false) {
+        char* begin = next;
+        if (slash) {
+            *next++ = '/';
+        }
+        std::memcpy(next, text.data(), text.size());
+        next += text.size();
+        *next++ = '\0';
+        return begin;
+    };
+    const char* authority = copy(parsed->authority);
+    const char* host = copy(parsed->host);
+    const char* port = copy(parsed->port);
+    const char* target = copy(parsed->target, query_only);
+    return connect_tcp(host, port) && upgrade_websocket(authority, target);
 }
 
 bool SendspinClientConnection::wait_for_connection(int fd) {
@@ -173,12 +153,12 @@ bool SendspinClientConnection::connect_address(const zsock_addrinfo& address) {
     return false;
 }
 
-bool SendspinClientConnection::connect_tcp(const std::string& host, const std::string& port) {
+bool SendspinClientConnection::connect_tcp(const char* host, const char* port) {
     zsock_addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     zsock_addrinfo* addresses = nullptr;
-    if (zsock_getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses) != 0) {
+    if (zsock_getaddrinfo(host, port, &hints, &addresses) != 0) {
         return false;
     }
     for (auto* addr = addresses; addr != nullptr && !stop_; addr = addr->ai_next) {
@@ -190,15 +170,20 @@ bool SendspinClientConnection::connect_tcp(const std::string& host, const std::s
     return tcp_socket_ >= 0 && !stop_;
 }
 
-bool SendspinClientConnection::upgrade_websocket(const std::string& authority,
-                                                 const std::string& target) {
+bool SendspinClientConnection::upgrade_websocket(const char* authority, const char* target) {
     websocket_request request{};
-    request.host = authority.c_str();
-    request.url = target.c_str();
+    request.host = authority;
+    request.url = target;
     request.tmp_buf = http_buffer_;
     request.tmp_buf_len = sizeof(http_buffer_);
     ws_socket_ = websocket_connect(tcp_socket_, &request, OPEN_TIMEOUT_MS, nullptr);
-    return ws_socket_ >= 0 && !stop_;
+    if (ws_socket_ < 0 || stop_) {
+        return false;
+    }
+    // websocket_send_msg() enforces its deadline after an EAGAIN. A blocking
+    // underlying socket could otherwise stay in sendmsg() past that deadline.
+    const int flags = zsock_fcntl(tcp_socket_, ZVFS_F_GETFL, 0);
+    return flags >= 0 && zsock_fcntl(tcp_socket_, ZVFS_F_SETFL, flags | ZVFS_O_NONBLOCK) == 0;
 }
 
 // Kept on the receive thread's stack. Control frames leave data-message assembly intact.
@@ -269,8 +254,7 @@ bool SendspinClientConnection::receive_fragment(const uint8_t* data, size_t len,
 }
 
 bool SendspinClientConnection::receive_data_frame(ReceiveState& state, const uint8_t* data,
-                                                  size_t len, uint32_t type,
-                                                  uint64_t remaining) {
+                                                  size_t len, uint32_t type, uint64_t remaining) {
     const bool frame_end = remaining == 0;
     const bool data_start = (type & (WEBSOCKET_FLAG_TEXT | WEBSOCKET_FLAG_BINARY)) != 0;
     if (state.frame_start && data_start == state.assembling) {
@@ -302,11 +286,12 @@ bool SendspinClientConnection::receive_data_frame(ReceiveState& state, const uin
 void SendspinClientConnection::receive() {
     uint8_t buffer[1024];
     ReceiveState state;
+    WebSocketReader reader;
     while (!stop_) {
         uint32_t type = 0;
         uint64_t remaining = 0;
-        const int len = websocket_recv_msg(ws_socket_, buffer, sizeof(buffer), &type, &remaining,
-                                           RECEIVE_TIMEOUT_MS);
+        const int len = reader.receive(ws_socket_, buffer, sizeof(buffer), &type, &remaining,
+                                       RECEIVE_TIMEOUT_MS);
         if (len == -EAGAIN) {
             continue;
         }
@@ -314,9 +299,8 @@ void SendspinClientConnection::receive() {
             break;
         }
         const bool control = (type & (WEBSOCKET_FLAG_PING | WEBSOCKET_FLAG_PONG)) != 0;
-        const bool received = control
-                                  ? receive_control_frame(state, buffer, len, type, remaining)
-                                  : receive_data_frame(state, buffer, len, type, remaining);
+        const bool received = control ? receive_control_frame(state, buffer, len, type, remaining)
+                                      : receive_data_frame(state, buffer, len, type, remaining);
         if (!received) {
             break;
         }

@@ -26,10 +26,10 @@
 
 #pragma once
 
-#include "platform/concurrency.h"
 #include "crypto/constants.h"
 #include "crypto/keys.h"
 #include "pairing_record.h"
+#include "platform/concurrency.h"
 #include "sendspin/client.h"
 #include "sendspin/config.h"
 #include "sendspin/persistence_keys.h"

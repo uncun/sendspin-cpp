@@ -2,59 +2,74 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "platform/logging.h"
+#include "platform/memory.h"
+#include "platform/thread_config.h"
+#include "thread_stack.h"
 #include <zephyr/kernel.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <functional>
+#include <new>
 #include <utility>
 
 namespace sendspin {
 
-struct ZephyrThreadConfig {
-    const char* name{"sendspin"};
-    size_t stack_size{CONFIG_SENDSPIN_THREAD_STACK_SIZE};
-    int priority{CONFIG_SENDSPIN_THREAD_PRIORITY};
-};
-
-inline k_spinlock thread_config_lock;
-inline ZephyrThreadConfig next_thread_config;
-
-// ESP priorities grow with urgency; Zephyr preemptive priorities grow in the opposite
-// direction. Keep application priorities relative to the configurable Zephyr base.
-inline void platform_configure_thread(const char* name, size_t stack_size, int priority, bool) {
-    k_spinlock_key_t key = k_spin_lock(&thread_config_lock);
-    next_thread_config = {name, std::max(stack_size, size_t(CONFIG_SENDSPIN_THREAD_STACK_SIZE)),
-                          std::clamp(CONFIG_SENDSPIN_THREAD_PRIORITY + 5 - priority, 0,
-                                     CONFIG_NUM_PREEMPT_PRIORITIES - 1)};
-    k_spin_unlock(&thread_config_lock, key);
-}
-
 // The control block and stack stay at stable addresses across moves. Like std::thread,
 // destroying a joinable thread is a programming error; owners signal stop before joining.
+// Allocation failure produces a non-joinable thread; callers must check before waiting.
 class PlatformThread {
 public:
     PlatformThread() = default;
     template <class Function, class Argument>
-    PlatformThread(Function function, Argument argument) {
-        ZephyrThreadConfig config;
-        {
-            k_spinlock_key_t key = k_spin_lock(&thread_config_lock);
-            config = next_thread_config;
-            next_thread_config = {};
-            k_spin_unlock(&thread_config_lock, key);
+    PlatformThread(Function function, Argument argument)
+        : PlatformThread(ThreadConfig{}, function, argument) {}
+    template <class Function, class Argument>
+    PlatformThread(const ThreadConfig& config, Function function, Argument argument) {
+        const size_t stack_size =
+            std::max(config.stack_size, size_t(CONFIG_SENDSPIN_THREAD_STACK_SIZE));
+        // ESP priorities grow with urgency; Zephyr preemptive priorities grow in the opposite
+        // direction.
+        const int priority = std::clamp(CONFIG_SENDSPIN_THREAD_PRIORITY + 5 - config.priority, 0,
+                                        CONFIG_NUM_PREEMPT_PRIORITIES - 1);
+        // Keep the callable inline in the same fallible platform allocation as the
+        // kernel control block; std::function can allocate a second, aborting block.
+        struct Invocation : State {
+            Function function;
+            Argument argument;
+            Invocation(Function entry, Argument arg)
+                : function(std::move(entry)), argument(std::move(arg)) {}
+        };
+        void* memory = platform_malloc_internal(sizeof(Invocation));
+        if (memory == nullptr) {
+            SS_LOGE("sendspin.thread", "No control block for %s", config.name);
+            return;
         }
-        state_ = new State;
-        state_->function = [function, argument] { function(argument); };
-        state_->stack = k_thread_stack_alloc(config.stack_size, 0);
+        state_ = new (memory) Invocation(std::move(function), std::move(argument));
+        state_->invoke = [](State* state) {
+            auto* call = static_cast<Invocation*>(state);
+            call->function(call->argument);
+        };
+        state_->release = [](State* state) {
+            auto* call = static_cast<Invocation*>(state);
+            call->~Invocation();
+            platform_free(call);
+        };
+        state_->stack = zephyr_thread_stack_alloc(stack_size);
         if (state_->stack == nullptr) {
-            std::abort();
+            SS_LOGE("sendspin.thread", "No stack for %s (%zu bytes)", config.name, stack_size);
+            State* state = std::exchange(state_, nullptr);
+            state->release(state);
+            return;
         }
         k_thread_create(
-            &state_->thread, state_->stack, config.stack_size,
-            [](void* arg, void*, void*) { static_cast<State*>(arg)->function(); }, state_, nullptr,
-            nullptr, config.priority, 0, K_FOREVER);
+            &state_->thread, state_->stack, stack_size,
+            [](void* arg, void*, void*) {
+                auto* state = static_cast<State*>(arg);
+                state->invoke(state);
+            },
+            state_, nullptr, nullptr, priority, 0, K_FOREVER);
         k_thread_name_set(&state_->thread, config.name);
         k_thread_start(&state_->thread);
     }
@@ -82,15 +97,17 @@ public:
             return;
         }
         k_thread_join(&state_->thread, K_FOREVER);
-        k_thread_stack_free(state_->stack);
-        delete std::exchange(state_, nullptr);
+        zephyr_thread_stack_free(state_->stack);
+        State* state = std::exchange(state_, nullptr);
+        state->release(state);
     }
 
 private:
     struct State {
         k_thread thread{};
         k_thread_stack_t* stack{nullptr};
-        std::function<void()> function;
+        void (*invoke)(State*){nullptr};
+        void (*release)(State*){nullptr};
     };
     State* state_{nullptr};
 };

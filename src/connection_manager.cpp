@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "platform/concurrency.h"
 #include "connection_manager.h"
 
 #include "admission.h"
@@ -21,6 +20,7 @@
 #include "connection_block.h"
 #include "constants.h"
 #include "crypto/constants.h"
+#include "platform/concurrency.h"
 #include "platform/json_arena.h"
 #include "platform/logging.h"
 #include "platform/time.h"

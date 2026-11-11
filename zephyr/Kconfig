@@ -7,6 +7,7 @@ menuconfig SENDSPIN
 	depends on NETWORKING && MULTITHREADING
 	select REQUIRES_FULL_LIBCPP
 	select WEBSOCKET_CLIENT
+	select MBEDTLS_PSA_CRYPTO_C if !BUILD_WITH_TFM
 	select PSA_WANT_ALG_SHA_1
 	select THREAD_STACK_INFO
 	select DYNAMIC_THREAD
@@ -43,14 +44,36 @@ config SENDSPIN_ENABLE_VISUALIZER
 config SENDSPIN_ENABLE_SOURCE
 	bool "Source role (PCM and FLAC encoding)"
 
+config SENDSPIN_STATIC_THREAD_STACKS
+	bool "Reserve a separate pool of Sendspin worker stacks"
+	depends on !USERSPACE
+	help
+	  Keep worker stacks out of the shared kernel heap. Stacks use internal
+	  RAM unless SENDSPIN_THREAD_STACKS_PSRAM is explicitly enabled.
+
+config SENDSPIN_THREAD_STACKS_PSRAM
+	bool "Place reserved worker stacks in ESP PSRAM"
+	depends on SENDSPIN_STATIC_THREAD_STACKS && ESP_SPIRAM
+	help
+	  Save internal RAM at the cost of external-memory access latency.
+	  Workers with these stacks must not access flash while its cache is
+	  disabled; persistence callbacks must use an internal application stack.
+
+config SENDSPIN_THREAD_COUNT
+	int "Maximum concurrent Sendspin workers"
+	depends on SENDSPIN_STATIC_THREAD_STACKS
+	default 4
+	range 1 16
+
 config SENDSPIN_THREAD_STACK_SIZE
 	int "Minimum stack size per Sendspin thread"
 	default 8192
 	range 2048 262144
 	help
 	  Stack sizes from the client/role configs are clamped to at least this
-	  size. Tune using stack analysis on the target board. Stacks use the
-	  Zephyr system heap (HEAP_MEM_POOL_SIZE); audio buffers use the C heap.
+	  size. With STATIC_THREAD_STACKS, each reserved stack has this size
+	  and larger requests fail. Otherwise stacks use the Zephyr system
+	  heap (HEAP_MEM_POOL_SIZE). Tune using stack analysis on the board.
 
 config SENDSPIN_THREAD_PRIORITY
 	int "Base Zephyr preemptive priority"

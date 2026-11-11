@@ -143,10 +143,15 @@ bool SyncTask::start(InboundRing* ring, bool task_stack_in_psram, unsigned prior
     // between the previous join and this start (cleanup() on a stopped task).
     this->event_flags_.clear_all();
 
-    platform_configure_thread("SsSync", SYNC_TASK_STACK_SIZE, static_cast<int>(priority),
-                              task_stack_in_psram);
-
-    this->sync_thread_ = PlatformThread(thread_entry, this);
+    this->sync_thread_ = platform_create_thread({.name = "SsSync",
+                                                 .stack_size = SYNC_TASK_STACK_SIZE,
+                                                 .priority = static_cast<int>(priority),
+                                                 .stack_in_psram = task_stack_in_psram},
+                                                thread_entry, this);
+    if (!this->sync_thread_.joinable()) {
+        this->inbound_.unbind();
+        return false;  // The platform logs the allocation failure.
+    }
 
     // Wait for the thread to reach IDLE before returning
     this->event_flags_.wait(EventGroupBits::TASK_IDLE | EventGroupBits::TASK_STOPPED, false, false,

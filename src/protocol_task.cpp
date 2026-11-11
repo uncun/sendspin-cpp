@@ -57,8 +57,15 @@ bool ProtocolTask::start(Tick tick, size_t stack_size, unsigned priority, bool s
     this->event_flags_.clear_all();
     this->tick_ = std::move(tick);
 
-    platform_configure_thread("SsProto", stack_size, static_cast<int>(priority), stack_in_psram);
-    this->thread_ = PlatformThread(thread_entry, this);
+    this->thread_ = platform_create_thread({.name = "SsProto",
+                                            .stack_size = stack_size,
+                                            .priority = static_cast<int>(priority),
+                                            .stack_in_psram = stack_in_psram},
+                                           thread_entry, this);
+    if (!this->thread_.joinable()) {
+        this->tick_ = {};
+        return false;  // The platform logs the allocation failure.
+    }
     return true;
 }
 

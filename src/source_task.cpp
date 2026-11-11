@@ -157,9 +157,16 @@ bool SourceTask::start(ProtocolTask* protocol_task) {
     } else if (config.codec == SendspinCodecFormat::FLAC) {
         stack_size = SourceRoleConfig::DEFAULT_FLAC_SOURCE_TASK_STACK_SIZE;
     }
-    platform_configure_thread("SsSrc", stack_size, static_cast<int>(config.priority),
-                              config.psram_stack);
-    this->task_thread_ = PlatformThread(thread_entry, this);
+
+    this->task_thread_ = platform_create_thread({.name = "SsSrc",
+                                                 .stack_size = stack_size,
+                                                 .priority = static_cast<int>(config.priority),
+                                                 .stack_in_psram = config.psram_stack},
+                                                thread_entry, this);
+    if (!this->task_thread_.joinable()) {
+        this->outbound_ring_.reset();
+        return false;  // The platform logs the allocation failure.
+    }
     this->event_flags_.wait(SourceTaskBits::SOURCE_TASK_IDLE | SourceTaskBits::SOURCE_TASK_STOPPED,
                             false, false, UINT32_MAX);
     return true;

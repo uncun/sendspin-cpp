@@ -217,9 +217,16 @@ bool VisualizerRole::Impl::start(InboundRing* ring) {
     // abort on failure; a consumer that requests no spectrum reserves nothing.
     this->drain_task->spectrum_bins.reserve(this->configured_spectrum_bins());
 
-    platform_configure_thread("SsVis", 4096, static_cast<int>(this->config.priority),
-                              this->config.psram_stack);
-    this->drain_task->drain_thread = PlatformThread(drain_thread_func, this);
+    this->drain_task->drain_thread =
+        platform_create_thread({.name = "SsVis",
+                                .stack_size = 4096,
+                                .priority = static_cast<int>(this->config.priority),
+                                .stack_in_psram = this->config.psram_stack},
+                               drain_thread_func, this);
+    if (!this->drain_task->drain_thread.joinable()) {
+        this->drain_task->inbound.unbind();
+        return false;  // The platform logs the allocation failure.
+    }
     return true;
 }
 
