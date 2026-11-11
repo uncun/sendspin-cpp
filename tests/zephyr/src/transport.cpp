@@ -9,6 +9,7 @@
 #include <zephyr/sys/base64.h>
 #include <zephyr/ztest.h>
 
+#include <cerrno>
 #include <cstring>
 #include <string>
 
@@ -19,6 +20,7 @@ struct Peer {
     int listener{-1};
     EventFlags flags;
     bool success{false};
+    bool client_closed{false};
 };
 
 bool read_request(int fd, std::string& request) {
@@ -113,7 +115,17 @@ void serve(Peer* peer) {
         }
     }
     peer->flags.set(1);
-    peer->flags.wait(2, true, true, 3000);
+    peer->flags.wait(2, true, true, UINT32_MAX);
+    // The connection owner cancels and joins its worker after releasing this wait.
+    // A blocking read proves the peer sees EOF; the suite watchdog guards hangs.
+    if (fd >= 0) {
+        // The WebSocket close frame may precede TCP EOF; consume it too.
+        int count;
+        do {
+            count = zsock_recv(fd, buffer, sizeof(buffer), 0);
+        } while (count > 0);
+        peer->client_closed = count == 0 || (count < 0 && errno == ECONNRESET);
+    }
     if (fd >= 0) {
         zsock_shutdown(fd, ZSOCK_SHUT_RDWR);
     }
@@ -126,7 +138,7 @@ void serve(Peer* peer) {
 }
 }  // namespace
 
-ZTEST(sendspin_zephyr, test_websocket_frames_ping_and_fragmentation) {
+ZTEST(sendspin_zephyr, test_websocket_frames_ping_fragmentation_and_cancellation) {
     Peer peer;
     peer.flags.create();
     peer.listener = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -177,16 +189,7 @@ ZTEST(sendspin_zephyr, test_websocket_frames_ping_and_fragmentation) {
         peer.flags.set(2);
     }
     server.join();
+    zassert_true(peer.client_closed);
     zsock_close(peer.listener);
     ring.reset();
-}
-
-ZTEST(sendspin_zephyr, test_cancelled_and_unsupported_urls) {
-    for (const char* url :
-         {"wss://localhost/sendspin", "ws://", "ws://localhost:0/", "ws://[::1"}) {
-        SendspinClientConnection connection(url);
-        connection.start();
-        connection.close_transport_now();
-        zassert_false(connection.is_connected());
-    }
 }

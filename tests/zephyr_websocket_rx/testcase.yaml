@@ -1,0 +1,5 @@
+tests:
+  sendspin.zephyr.websocket_rx:
+    tags: [sendspin, net]
+    platform_allow: [qemu_cortex_a9, native_sim/native/64]
+    integration_platforms: [native_sim/native/64]

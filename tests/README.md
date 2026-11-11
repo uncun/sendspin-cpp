@@ -88,6 +88,7 @@ Each `test_*.cpp` file covers one unit of cross-platform logic:
 - `test_protocol_task.cpp`: `ProtocolTask`'s command queue (order, the consumer burst and the
   reserved accept slots), the latest-state slot, the lifecycle-request slot's wake and its
   hand-off at stop, the wakes, and stop/restart.
+- `test_websocket_url.cpp`: outbound WebSocket URI validation and views into the supplied URL.
 - `test_yield_window.cpp`: when a unit of work waits out a yield window, which receives count as
   back to back, and how long a thread stays busy before it yields.
 - `test_player_role.cpp`: the player's `client/state` timing parameters and the

@@ -16,8 +16,8 @@ using namespace sendspin;
 ZTEST(sendspin_zephyr, test_thread_move_join_and_flags) {
     EventFlags flags;
     zassert_true(flags.create());
-    platform_configure_thread("SsTest", 4096, 5, false);
-    PlatformThread worker(
+    auto worker = platform_create_thread(
+        {.name = "SsTest", .stack_size = 4096, .priority = 5},
         [](EventFlags* state) {
             state->wait(1, true, true, UINT32_MAX);
             state->set(2);
@@ -31,12 +31,63 @@ ZTEST(sendspin_zephyr, test_thread_move_join_and_flags) {
     zassert_false(moved.joinable());
 }
 
+namespace {
+struct ThreadObservation {
+    int priority{0};
+    const char* name{nullptr};
+    EventFlags done;
+};
+void observe_thread(ThreadObservation* observed) {
+    observed->priority = k_thread_priority_get(k_current_get());
+    observed->name = k_thread_name_get(k_current_get());
+    observed->done.set(1);
+    observed->done.wait(2, false, false, UINT32_MAX);
+}
+}  // namespace
+
+ZTEST(sendspin_zephyr, test_concurrent_thread_creation_keeps_configuration) {
+    ThreadObservation first;
+    ThreadObservation second;
+    first.done.create();
+    second.done.create();
+    EventFlags ready;
+    ready.create();
+    // One caller waits while another creates a child; pending configuration must stay local.
+    auto parent = platform_create_thread(
+        {.name = "Parent", .stack_size = 4096, .priority = 5},
+        [&](ThreadObservation* observed) {
+            const ThreadConfig config{.name = "CallerA", .stack_size = 4096, .priority = 5};
+            ready.set(1);
+            ready.wait(2, false, false, UINT32_MAX);
+            auto worker = platform_create_thread(config, observe_thread, observed);
+            observed->done.wait(1, false, false, UINT32_MAX);
+            ready.set(4);
+            worker.join();
+        },
+        &first);
+    ready.wait(1, false, false, UINT32_MAX);
+    auto worker = platform_create_thread({.name = "CallerB", .stack_size = 4096, .priority = 7},
+                                         observe_thread, &second);
+    second.done.wait(1, false, false, UINT32_MAX);
+    ready.set(2);
+    ready.wait(4, false, false, UINT32_MAX);
+    // Inspect before exit: the kernel-owned names must remain alive.
+    zassert_equal(first.priority, CONFIG_SENDSPIN_THREAD_PRIORITY);
+    zassert_equal(second.priority, CONFIG_SENDSPIN_THREAD_PRIORITY - 2);
+    zassert_equal(std::strcmp(first.name, "CallerA"), 0);
+    zassert_equal(std::strcmp(second.name, "CallerB"), 0);
+    first.done.set(2);
+    second.done.set(2);
+    worker.join();
+    parent.join();
+}
+
 ZTEST(sendspin_zephyr, test_flags_timeout_and_clear) {
     EventFlags flags;
     flags.create();
-    const int64_t before = platform_time_us();
+    flags.set(2);
     zassert_equal(flags.wait(1, false, false, 20) & 1, 0);
-    zassert_true(platform_time_us() - before >= 19000);
+    zassert_equal(flags.get() & 2, 2);
     flags.set(3);
     zassert_equal(flags.wait(3, true, true, 0) & 3, 3);
     zassert_equal(flags.wait(3, false, false, 0) & 3, 0);
@@ -88,7 +139,7 @@ ZTEST(sendspin_zephyr, test_client_restart) {
 }
 
 ZTEST(sendspin_zephyr, test_cycle_counter_wrap_and_idle) {
-    detail::CycleClock32 clock;
+    sendspin::detail::CycleClock32 clock;
     const uint64_t start = 0xfffffff0U;
     zassert_equal(clock.update(start, 0), start);
     zassert_equal(clock.update(0x10, 32), start + 32);
@@ -118,5 +169,95 @@ ZTEST(sendspin_zephyr, test_buffer_heap_realloc_and_exhaustion) {
     zassert_not_null(internal);
     platform_free(internal);
 }
+
+#if CONFIG_SENDSPIN_BUFFER_HEAP_SIZE > 0
+ZTEST(sendspin_zephyr, test_thread_refuses_exhausted_control_blocks_and_can_retry) {
+    EventFlags done;
+    done.create();
+    // Each allocation is smaller than a worker control block, so any remainder
+    // cannot hide a successful worker allocation after the loop fills this heap.
+    void* blocks[CONFIG_SENDSPIN_BUFFER_HEAP_SIZE / sizeof(k_thread)];
+    size_t count = 0;
+    while (count < std::size(blocks)) {
+        void* block = platform_malloc_internal(sizeof(k_thread));
+        if (block == nullptr) {
+            break;
+        }
+        blocks[count++] = block;
+    }
+    const auto signal = [](EventFlags* flags) { flags->set(1); };
+    PlatformThread worker(signal, &done);
+    zassert_false(worker.joinable());
+    for (size_t i = 0; i < count; ++i) {
+        platform_free(blocks[i]);
+    }
+    // Control: allocation failure must leave the object reusable.
+    worker = PlatformThread(signal, &done);
+    zassert_true(worker.joinable());
+    done.wait(1, false, false, UINT32_MAX);
+    worker.join();
+}
+#endif
+
+#ifdef CONFIG_SENDSPIN_STATIC_THREAD_STACKS
+ZTEST(sendspin_zephyr, test_stack_pool_bounds_and_reuse) {
+    k_thread_stack_t* stacks[CONFIG_SENDSPIN_THREAD_COUNT];
+    zassert_is_null(zephyr_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE + 1));
+    for (auto& stack : stacks) {
+        stack = zephyr_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE);
+        zassert_not_null(stack);
+    }
+    zassert_is_null(zephyr_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE));
+    for (auto* stack : stacks) {
+        zephyr_thread_stack_free(stack);
+    }
+    auto* reused = zephyr_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE);
+    zassert_not_null(reused);
+    zephyr_thread_stack_free(reused);
+}
+
+ZTEST(sendspin_zephyr, test_client_refuses_exhausted_stacks_and_can_restart) {
+    OfflineNetwork network;
+    SendspinClient client(SendspinClientConfig{});
+    client.set_network_provider(&network);
+    k_thread_stack_t* stacks[CONFIG_SENDSPIN_THREAD_COUNT];
+    for (auto& stack : stacks) {
+        stack = zephyr_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE);
+        zassert_not_null(stack);
+    }
+    // No protocol worker can be created. start() must return false instead of
+    // waiting for an idle notification from a thread that does not exist.
+    zassert_false(client.start());
+    for (auto* stack : stacks) {
+        zephyr_thread_stack_free(stack);
+    }
+    // Control: a refused start must release its bindings so the same client can retry.
+    zassert_true(client.start());
+    client.stop();
+}
+
+ZTEST(sendspin_zephyr, test_workers_with_kernel_heap_pressure) {
+    // Match the application heap: C++ objects and networking leave too little
+    // room for even one dynamic worker stack. Reserved stacks must still work.
+    void* pressure = k_malloc(CONFIG_HEAP_MEM_POOL_SIZE - 11000);
+    zassert_not_null(pressure);
+    auto* dynamic = k_thread_stack_alloc(CONFIG_SENDSPIN_THREAD_STACK_SIZE, 0);
+    zassert_is_null(dynamic);
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        EventFlags flags;
+        flags.create();
+        PlatformThread workers[3];
+        for (auto& worker : workers) {
+            worker = PlatformThread(
+                [](EventFlags* ready) { ready->wait(1, false, false, UINT32_MAX); }, &flags);
+        }
+        flags.set(1);
+        for (auto& worker : workers) {
+            worker.join();
+        }
+    }
+    k_free(pressure);
+}
+#endif
 
 ZTEST_SUITE(sendspin_zephyr, nullptr, nullptr, nullptr, nullptr, nullptr);

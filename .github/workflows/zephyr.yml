@@ -13,6 +13,12 @@ jobs:
   zephyr:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [qemu_cortex_a9, native_sim/native/64]
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: ${{ matrix.platform == 'qemu_cortex_a9' && 'zephyr' || 'host' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -21,7 +27,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build gperf device-tree-compiler
+          sudo apt-get install -y ninja-build gperf device-tree-compiler gcc g++
           pip install west pyyaml
       - name: Create west workspace with the module's dependency manifest
         run: |
@@ -46,14 +52,17 @@ jobs:
           pip install -r zephyr/scripts/requirements-base.txt \
             -r zephyr/scripts/requirements-build-test.txt \
             -r zephyr/scripts/requirements-run-test.txt
-          west sdk install --version 0.17.4 --toolchains arm-zephyr-eabi
-      - name: Build and run Zephyr tests on ARM
+          if [ "${{ matrix.platform }}" = "qemu_cortex_a9" ]; then
+            west sdk install --version 0.17.4 --toolchains arm-zephyr-eabi
+          fi
+      - name: Build and run Zephyr tests
         run: |
           cd "$RUNNER_TEMP/sendspin-west"
-          west twister -T "$GITHUB_WORKSPACE/tests/zephyr" -p qemu_cortex_a9 \
+          west twister -T "$GITHUB_WORKSPACE/tests/zephyr" \
+            -T "$GITHUB_WORKSPACE/tests/zephyr_websocket_rx" -p "${{ matrix.platform }}" \
             --inline-logs -O build-tests -x "ZEPHYR_EXTRA_MODULES=$GITHUB_WORKSPACE"
       - name: Build example without audio roles
         run: |
           cd "$RUNNER_TEMP/sendspin-west"
-          west build -b qemu_cortex_a9 "$GITHUB_WORKSPACE/examples/zephyr_client" -d build-sample -- \
+          west build -b "${{ matrix.platform }}" "$GITHUB_WORKSPACE/examples/zephyr_client" -d build-sample -- \
             -DZEPHYR_EXTRA_MODULES="$GITHUB_WORKSPACE"

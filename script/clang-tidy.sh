@@ -40,10 +40,11 @@ echo "Generating compile_commands.json..."
 cmake -B "$BUILD_DIR" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DSENDSPIN_ENABLE_MESSAGE_TRACE=ON \
     "$ROOT_DIR" > /dev/null
 
-# Find all source files, excluding build/ and src/esp/ directories
+# Find all source files, excluding build/ and platform-specific networking directories
 SOURCES=$(find "$ROOT_DIR/src" \
     -path '*/build' -prune -o \
     -path '*/src/esp' -prune -o \
+    -path '*/src/zephyr' -prune -o \
     \( -name '*.cpp' -o -name '*.c' \) -print 2>/dev/null || true)
 
 if [ -z "$SOURCES" ]; then
