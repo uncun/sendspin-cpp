@@ -4,10 +4,10 @@ sendspin-cpp is a Zephyr module. Add it to your application's west manifest,
 import its dependency manifest, and enable `CONFIG_SENDSPIN`. Dependencies are
 fetched by `west update`; CMake does not download anything.
 
-The port targets Zephyr 4.3 and the Zephyr SDK with the full GNU C++ library.
+The port supports Zephyr 4.3 and 4.4 with the full GNU C++ library.
 It uses native kernel threads, mutexes and condition variables, BSD sockets,
 Zephyr's WebSocket client and `sys_csrand_get()` for Noise encryption and pairing.
-It does not require POSIX threads or IXWebSocket. The monotonic clock uses the
+It does not require POSIX threads, IXWebSocket, or patches to Zephyr. The monotonic clock uses the
 hardware cycle counter for microsecond timestamps, extending 32-bit counters
 across wraps and idle periods using kernel uptime.
 
@@ -21,14 +21,13 @@ manifest:
     # Keep your existing Zephyr project and other dependencies here.
     - name: sendspin-cpp
       url: https://github.com/Sendspin/sendspin-cpp
-      revision: feat/zephyr-west-module
+      revision: main
       path: modules/lib/sendspin-cpp
       import: true
 ```
 
-The revision above is the development branch for this port. Before the upstream
-PR is merged, use the URL of the fork publishing that branch. For production,
-pin the reviewed commit or a release that contains the port.
+For production, pin a reviewed commit or a release that contains the Zephyr
+module.
 
 ```sh
 west update
@@ -67,7 +66,7 @@ Enable the board's network and entropy drivers. Add DHCP or static addressing
 and DNS as appropriate for the product. `CONFIG_SENDSPIN` requires C++20 or
 newer and selects a full C++ standard library, WebSockets and dynamic kernel
 stacks. A cryptographic random generator is mandatory. The test project enables
-Zephyr's insecure test generator only for QEMU; do not use it in firmware.
+Zephyr's insecure test generator only for simulated boards; do not use it in firmware.
 
 Select roles with `CONFIG_SENDSPIN_ENABLE_PLAYER`, `_CONTROLLER`, `_METADATA`,
 `_COLOR`, `_ARTWORK`, `_VISUALIZER` and `_SOURCE`. Player, controller and metadata
@@ -77,15 +76,24 @@ included in this port.
 
 `CONFIG_SENDSPIN_THREAD_STACK_SIZE` sets a minimum stack per worker (8192 bytes
 by default). Larger per-role stack requests are honored. Dynamic stacks come
-from the kernel heap; C++ objects, Noise state, JSON and audio buffers come from
-the C heap. Size both heaps and role buffer capacities for the application.
+from the kernel heap; C++ objects and Noise state use the C heap. Native worker
+control blocks, URL conversion storage, JSON and audio buffers use the platform
+allocator. Size both heaps and role buffer capacities for the application.
 Artwork and audio defaults can exceed MCU RAM: configure them explicitly and
 check `start()` failures. By default, allocations use the configured libc heap. An optional
 `CONFIG_SENDSPIN_BUFFER_HEAP_SIZE` reserves a separate platform-buffer heap,
 placed in PSRAM with `CONFIG_ESP_SPIRAM`. Both placement preferences use this
 heap. `CONFIG_SENDSPIN_KERNEL_MALLOC` redirects application-wide C allocations
 to the kernel heap; set `CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=0` when using it.
-Thread stacks still use the kernel heap and ignore per-role PSRAM flags.
+Thread stacks use the kernel heap by default. For constrained boards,
+`CONFIG_SENDSPIN_STATIC_THREAD_STACKS` reserves `CONFIG_SENDSPIN_THREAD_COUNT`
+stacks of `CONFIG_SENDSPIN_THREAD_STACK_SIZE` bytes in internal RAM. To place
+this pool in ESP PSRAM, explicitly enable `CONFIG_SENDSPIN_THREAD_STACKS_PSRAM`
+and measure scheduling and audio performance on the board. The pool never
+falls back to the shared heap. Oversized requests or exhaustion refuse worker
+creation: client/role startup returns false, and an outbound attempt reports
+its transport closed. Per-role PSRAM flags remain ignored. Persistence callbacks
+must run on an internal application stack when worker stacks are in PSRAM.
 
 Library diagnostics use Zephyr logging, controlled by `CONFIG_SENDSPIN_LOG_LEVEL`.
 The runtime log-level setter has no effect on Zephyr.
@@ -121,8 +129,9 @@ effect on this port. TCP and WebSocket upgrade waits are bounded; DNS lookup
 uses Zephyr's resolver timeout. Shutdown may wait for an in-progress lookup or
 upgrade to finish.
 
-For playback, enable the player role and implement `SendspinAudioSink` with the
-board's audio/I2S driver and accurate buffered-frame/latency reporting. See the
+For playback, enable the player role and implement `PlayerRoleListener` with
+the board's audio/I2S driver, including `on_audio_output()` and the `AudioFormat`
+supplied with each write. Report completed playback using `PlayerRole::notify_audio_played()` for accurate synchronization. See the
 [Integration Guide](integration-guide.md) and [Playback Sync](playback-sync.md)
 for the callback contracts. The portable source role similarly needs an
 application capture driver. This module does not configure audio hardware.
@@ -135,12 +144,27 @@ identity and pairing records are regenerated after reboot.
 
 The Zephyr ztest application compiles every role, including PCM/FLAC player and
 source code, and exercises native threads, flag timeouts, ring reclamation and
-client start/stop/restart. A loopback WebSocket peer checks a masked client send,
-large-message reception, ping/pong and interleaved continuation frames:
+client start/stop/restart and refusal/retry when worker resources are exhausted.
+A loopback WebSocket peer checks a masked client send,
+large-message reception, ping/pong, interleaved continuation frames and transport
+cancellation. The host unit suite checks URL validation with accepted and
+rejected addresses in one table:
 
 ```sh
-west twister -T modules/lib/sendspin-cpp/tests/zephyr -p qemu_cortex_a9 --inline-logs
+west twister -T modules/lib/sendspin-cpp/tests/zephyr \
+  -T modules/lib/sendspin-cpp/tests/zephyr_websocket_rx \
+  -p qemu_cortex_a9 -p native_sim/native/64 --inline-logs
 ```
+
+The dedicated WebSocket receive suite supplies interrupted TCP byte streams to
+Zephyr's production parser, verifying partial timeouts, masking and empty frames
+without wall-clock assertions. Both simulated platforms run in CI; native_sim
+also exercises the reserved stack pool.
+
+The transport starts each frame with a one-byte payload read, then tracks the
+remaining bytes locally. This preserves framing on Zephyr versions that return
+partial payloads on timeout without updating their output metadata; it requires
+no changes to Zephyr's WebSocket implementation.
 
 The sample and tests do not establish hardware audio performance or Sendspin
 server interoperability; verify those on the deployment board.

@@ -78,7 +78,7 @@ docs/                       - integration-guide.md (consumer guide), internals.m
 
 Headers in `src/platform/` select ESP-IDF, Zephyr or host implementations.
 `concurrency.h` provides PlatformMutex and PlatformConditionVariable; `thread.h`
-provides PlatformThread and platform_sleep_for. Host and ESP use standard C++
+provides PlatformThread, platform_create_thread and platform_sleep_for. Host and ESP use standard C++
 primitives; Zephyr uses native kernel primitives (`platform/zephyr/thread.h`).
 
 - `logging.h`: `SS_LOGE`/`SS_LOGW`/`SS_LOGI`/`SS_LOGD`/`SS_LOGV` macros (ESP: `esp_log.h`, host: `printf`-based)
