@@ -32,9 +32,14 @@ namespace sendspin {
 ///
 /// 32 bytes cover a control block that counts with atomics. A libstdc++ built with the mutex lock
 /// policy, as Raspbian's ARMv6 one is, also embeds a mutex in it, and std::mutex has the size of
-/// that mutex.
+/// that mutex. Zephyr uses native kernel locks and has no std::mutex; its control block
+/// uses the atomic or single-thread policy.
 template <typename Conn>
+#ifdef __ZEPHYR__
+inline constexpr size_t CONNECTION_BLOCK_BYTES = sizeof(Conn) + 32;
+#else
 inline constexpr size_t CONNECTION_BLOCK_BYTES = sizeof(Conn) + 32 + sizeof(std::mutex);
+#endif
 
 /// @brief Hands std::allocate_shared() one block reserved before the call, and frees it with
 /// platform_free() once the control block goes

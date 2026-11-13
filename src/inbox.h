@@ -444,7 +444,7 @@ public:
         if (!this->check_bound()) {
             return Result{};
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         return fn(static_cast<const T&>(this->slot_));
     }
 
@@ -458,7 +458,7 @@ public:
         if (!this->check_bound()) {
             return;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         if (fn(this->slot_)) {
             return;
         }
@@ -494,7 +494,7 @@ public:
         if (!this->check_bound()) {
             return false;
         }
-        std::lock_guard<std::mutex> lock(this->inbox_->mutex_);
+        std::lock_guard<PlatformMutex> lock(this->inbox_->mutex_);
         if (!this->dirty_) {
             return false;
         }
